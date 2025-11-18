@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -12,7 +13,7 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
-import { HistoryIcon } from './components/icons';
+import { HistoryIcon, ResyncIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 
 type SyncStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -76,7 +77,8 @@ const App: React.FC = () => {
       setSyncStatus('success');
       // Only switch view if we have cards, otherwise stay on scanner
       if (migratedCards.length > 0) {
-        setView('history');
+        // Optional: automatically switch to history. 
+        // Removed to prevent jarring UX if user just wants to scan.
       }
     } catch (err: any) {
       console.error("Failed to sync with Google Drive", err);
@@ -391,11 +393,26 @@ const App: React.FC = () => {
 
   const renderHeaderControls = () => {
     if (!user) return null;
-    if (syncStatus === 'loading') return <button disabled className="py-2 px-4 bg-slate-500 text-white font-semibold rounded-lg shadow-md animate-pulse">Syncing...</button>;
-    if (syncStatus === 'error') return <button onClick={handleSyncWithDrive} className="py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition">Sync Failed. Retry?</button>;
+    
+    // We display the button even if loading, but maybe with a different state
+    if (syncStatus === 'loading') {
+      return <button disabled className="py-2 px-4 bg-slate-500 text-white font-semibold rounded-lg shadow-md animate-pulse">Syncing...</button>;
+    }
+    
+    if (syncStatus === 'error') {
+      return (
+        <button onClick={handleSyncWithDrive} className="flex items-center gap-2 py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition">
+          <ResyncIcon className="w-5 h-5" />
+          <span>Retry Sync</span>
+        </button>
+      );
+    }
     
     // Default state (idle or success) - allows user to toggle views
     const needsReviewCount = cards.filter(c => c.status === 'needs_review').length;
+    
+    // If we have cards, show the count. If we have 0 cards but synced successfully, show "My Collection".
+    // This ensures the button is always available if they want to check the empty state or if sync happened but returned 0.
     return (
       <button 
         onClick={() => setView(view === 'history' ? 'scanner' : 'history')} 
