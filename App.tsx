@@ -10,11 +10,13 @@ import {
   regenerateCardAnalysisForGrade,
   identifyCard,
   gradeAndSummarizeCard,
+  saveManualApiKey
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
 import { HistoryIcon, ResyncIcon, SpinnerIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
+import { ApiKeyModal } from './components/ApiKeyModal';
 
 type SyncStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -33,6 +35,7 @@ const App: React.FC = () => {
   const [rewrittenCount, setRewrittenCount] = useState(0);
   const [rewriteFailCount, setRewriteFailCount] = useState(0);
   const [rewriteStatusMessage, setRewriteStatusMessage] = useState('');
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   
   // Ref to track which cards are currently being processed to prevent duplicates
   const processingCards = useRef(new Set<string>());
@@ -187,15 +190,22 @@ const App: React.FC = () => {
 
     } catch (err: any) {
       console.error(`Failed to process card ${cardToProcess.id} with status ${cardToProcess.status}:`, err);
-      setCards(currentCards => {
-        const updatedCards = currentCards.map(c => 
-          c.id === cardToProcess.id 
-            ? { ...c, status: 'grading_failed' as const, errorMessage: err.message || 'Unknown error' } 
-            : c
-        );
-        saveCollectionToDrive(updatedCards);
-        return updatedCards;
-      });
+      
+      if (err.message === 'API_KEY_MISSING') {
+          setIsApiKeyModalOpen(true);
+          // Revert status to let user try again after entering key
+          setCards(currentCards => currentCards.map(c => c.id === cardToProcess.id ? { ...c, status: 'grading_failed', errorMessage: "Missing API Key" } : c));
+      } else {
+          setCards(currentCards => {
+            const updatedCards = currentCards.map(c => 
+              c.id === cardToProcess.id 
+                ? { ...c, status: 'grading_failed' as const, errorMessage: err.message || 'Unknown error' } 
+                : c
+            );
+            saveCollectionToDrive(updatedCards);
+            return updatedCards;
+          });
+      }
     } finally {
       processingCards.current.delete(cardToProcess.id);
     }
@@ -307,6 +317,12 @@ const App: React.FC = () => {
                         setRewrittenCount(prev => prev + 1);
                     }
                 } catch (err: any) {
+                    if (err.message === 'API_KEY_MISSING') {
+                         setIsApiKeyModalOpen(true);
+                         // Break queue processing
+                         queue.length = 0; 
+                         throw err;
+                    }
                     failedCardsResult.push({ card, error: err.message || 'Unknown error' });
                     setRewriteFailCount(prev => prev + 1);
                 } finally {
@@ -326,8 +342,10 @@ const App: React.FC = () => {
                 return finalCards;
             });
         }
-    } catch (e) {
-        setError("An unexpected error occurred during the rewrite process setup.");
+    } catch (e: any) {
+        if (e.message !== 'API_KEY_MISSING') {
+             setError("An unexpected error occurred during the rewrite process.");
+        }
     } finally {
         setIsRewriting(false);
     }
@@ -476,6 +494,17 @@ const App: React.FC = () => {
                 </div>
             )}
             {renderView()}
+            {isApiKeyModalOpen && (
+              <ApiKeyModal 
+                onSave={(key) => {
+                    saveManualApiKey(key);
+                    setIsApiKeyModalOpen(false);
+                    // Retry mechanism: User will likely have to click "Add to Queue" again or delete/retry failed card
+                    alert("Key saved! Please try grading the card again.");
+                }}
+                onClose={() => setIsApiKeyModalOpen(false)}
+              />
+            )}
         </main>
     </div>
   );

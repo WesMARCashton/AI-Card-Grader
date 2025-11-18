@@ -57,8 +57,9 @@ const handleGeminiError = (error: any, context: string): Error => {
         userFriendlyMessage = "The AI returned an invalid response. This can be intermittent. Please try again.";
     } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
         userFriendlyMessage = "A network error occurred. Please check your internet connection and try again.";
-    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing')) {
-        userFriendlyMessage = "Configuration Error: The Gemini API Key is missing. Please check your Cloud Run Variables & Secrets.";
+    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing') || originalErrorMessage.includes('API_KEY_MISSING')) {
+        // Keep this specific string so App.tsx can catch it and show the modal
+        return new Error("API_KEY_MISSING"); 
     } else {
         userFriendlyMessage = `An unexpected error occurred: ${originalErrorMessage}`;
     }
@@ -215,19 +216,30 @@ const getAIClient = () => {
   // Explicitly check window.env existence to avoid TS errors or runtime issues
   const env = (window as any).env;
   
-  // Prioritize the VITE_API_KEY which is injected by our server.js into window.env
-  // Fallback to import.meta.env for local dev if configured
-  const apiKey = env?.VITE_API_KEY || import.meta.env?.VITE_API_KEY;
+  // Priority 1: Server Injected Key
+  let apiKey = env?.VITE_API_KEY;
+  
+  // Priority 2: Local Dev Key
+  if (!apiKey) {
+      apiKey = import.meta.env?.VITE_API_KEY;
+  }
+
+  // Priority 3: Manual Local Storage Key (Fallback)
+  if (!apiKey) {
+      apiKey = localStorage.getItem('gemini_api_key');
+  }
 
   if (!apiKey) {
       // Log helpful info for debugging in the browser console
       console.error("Gemini API Key Check Failed.");
-      console.error("Value in window.env.VITE_API_KEY:", env?.VITE_API_KEY ? 'Present' : 'Missing');
-      console.error("Value in import.meta.env.VITE_API_KEY:", import.meta.env?.VITE_API_KEY ? 'Present' : 'Missing');
-      
-      throw new Error("API Key is missing. Please set VITE_API_KEY in your Cloud Run Variables & Secrets.");
+      throw new Error("API_KEY_MISSING");
   }
   return new GoogleGenAI({ apiKey });
+};
+
+// Helper to save manual key
+export const saveManualApiKey = (key: string) => {
+    localStorage.setItem('gemini_api_key', key);
 };
 
 // STEP 1: Identify the card
