@@ -13,7 +13,7 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
-import { HistoryIcon, ResyncIcon } from './components/icons';
+import { HistoryIcon, ResyncIcon, SpinnerIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 
 type SyncStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -394,38 +394,38 @@ const App: React.FC = () => {
   const renderHeaderControls = () => {
     if (!user) return null;
     
-    // We display the button even if loading, but maybe with a different state
-    if (syncStatus === 'loading') {
-      return <button disabled className="py-2 px-4 bg-slate-500 text-white font-semibold rounded-lg shadow-md animate-pulse">Syncing...</button>;
-    }
-    
-    if (syncStatus === 'error') {
-      return (
-        <button onClick={handleSyncWithDrive} className="flex items-center gap-2 py-2 px-4 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition">
-          <ResyncIcon className="w-5 h-5" />
-          <span>Retry Sync</span>
-        </button>
-      );
-    }
-    
-    // Default state (idle or success) - allows user to toggle views
     const needsReviewCount = cards.filter(c => c.status === 'needs_review').length;
     
-    // If we have cards, show the count. If we have 0 cards but synced successfully, show "My Collection".
-    // This ensures the button is always available if they want to check the empty state or if sync happened but returned 0.
     return (
-      <button 
-        onClick={() => setView(view === 'history' ? 'scanner' : 'history')} 
-        className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300"
-      >
-        <HistoryIcon className="h-5 w-5" />
-        <span>{view === 'history' ? 'Back to Scanner' : `My Collection (${cards.length})`}</span>
-        {needsReviewCount > 0 && view !== 'history' && (
-          <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-xs font-bold">
-            {needsReviewCount}
-          </span>
-        )}
-      </button>
+      <div className="flex gap-2">
+        {/* Manual Sync Button */}
+        <button 
+            onClick={handleSyncWithDrive} 
+            disabled={syncStatus === 'loading'}
+            className={`flex items-center justify-center w-10 h-10 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300 ${syncStatus === 'loading' ? 'cursor-not-allowed opacity-70' : ''}`}
+            title={syncStatus === 'loading' ? 'Syncing...' : 'Sync with Drive'}
+        >
+             {syncStatus === 'loading' ? (
+                 <SpinnerIcon className="w-5 h-5 text-blue-600" />
+             ) : (
+                 <ResyncIcon className={`w-5 h-5 ${syncStatus === 'error' ? 'text-red-500' : 'text-slate-600'}`} />
+             )}
+        </button>
+
+        {/* Navigation Button - Always Visible */}
+        <button 
+          onClick={() => setView(view === 'history' ? 'scanner' : 'history')} 
+          className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300"
+        >
+          <HistoryIcon className="h-5 w-5" />
+          <span>{view === 'history' ? 'Back to Scanner' : `My Collection (${cards.length})`}</span>
+          {needsReviewCount > 0 && view !== 'history' && (
+            <span className="absolute -top-2 -right-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-xs font-bold">
+              {needsReviewCount}
+            </span>
+          )}
+        </button>
+      </div>
     );
   };
 
