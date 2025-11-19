@@ -39,24 +39,8 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
 
     // 2. Format the new card data into rows
     const newRows = cardsToSync.sort((a,b) => a.timestamp - b.timestamp).map(card => {
-        // Safely handle potentially undefined strings
-        const companyStr = (card.company || '').toString();
-        const setStr = (card.set || '').toString();
-
-        // Only hide the set name if it exactly matches the company name (e.g. Topps Topps)
-        const set = companyStr.toUpperCase() === setStr.toUpperCase() ? '' : setStr;
+        const set = card.company.toUpperCase() === card.set.toUpperCase() ? '' : card.set;
         const cardNumber = card.cardNumber ? `#${card.cardNumber}` : '';
-        
-        // MAPPING UPDATE:
-        // Col A: Year
-        // Col B: Company
-        // Col C: Set (Smart - hidden if matches company)
-        // Col D: Name
-        // Col E: Edition
-        // Col F: Set (Raw - always included if exists)
-        // Col G: Card Number
-        // Col H: Grade Name (Status)
-        // Col I: Overall Grade
         
         const stringValues = [
             card.year,
@@ -64,14 +48,13 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
             set,
             card.name,
             card.edition,
-            setStr, // Col F: Set
-            cardNumber, // Col G
-            card.gradeName, // Col H
+            cardNumber,
+            card.gradeName,
         ].map(value => (value || '').toString().toUpperCase());
 
         return [
             ...stringValues,
-            card.overallGrade, // Col I
+            card.overallGrade, // Grade
         ];
     });
 

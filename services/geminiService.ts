@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { CardData, EvaluationDetails } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
@@ -222,7 +221,7 @@ const getAIClient = () => {
   
   // Priority 2: Local Dev Key
   if (!apiKey) {
-      apiKey = (import.meta as any).env?.VITE_API_KEY;
+      apiKey = import.meta.env?.VITE_API_KEY;
   }
 
   // Priority 3: Manual Local Storage Key (Fallback)

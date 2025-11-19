@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -20,6 +19,8 @@ import { dataUrlToBase64 } from './utils/fileUtils';
 import { ApiKeyModal } from './components/ApiKeyModal';
 
 type SyncStatus = 'idle' | 'loading' | 'success' | 'error';
+
+const BACKUP_KEY = 'nga_card_backup';
 
 // Robust ID generator that works in all contexts (secure and non-secure)
 const generateId = () => {
@@ -51,9 +52,53 @@ const App: React.FC = () => {
   const processingCards = useRef(new Set<string>());
   const CONCURRENCY_LIMIT = 2; // Process up to 2 cards at a time to avoid rate limits
   
-  // Reset local state when the user signs out.
+  // --- CRASH RECOVERY & BACKUP SYSTEM ---
+
+  // 1. Save to Local Storage on every change
   useEffect(() => {
-    if (!user) {
+    if (cards.length > 0) {
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(cards));
+    }
+  }, [cards]);
+
+  // 2. Restore from Local Storage on Login
+  useEffect(() => {
+    if (user) {
+      const backup = localStorage.getItem(BACKUP_KEY);
+      if (backup) {
+        try {
+          const savedCards: CardData[] = JSON.parse(backup);
+          if (savedCards.length > 0) {
+            // Check for "Stuck" cards (cards that were processing when app crashed)
+            const recoveredCards = savedCards.map(c => {
+              if (['grading', 'challenging', 'regenerating_summary'].includes(c.status)) {
+                return { 
+                  ...c, 
+                  status: 'grading_failed' as const, 
+                  errorMessage: 'Recovered from session crash. Please retry.' 
+                };
+              }
+              return c;
+            });
+
+            // Only restore if we don't have cards yet (e.g., initial load)
+            // This acts as a cache-first strategy
+            setCards(current => {
+              if (current.length === 0) {
+                console.log(`Restored ${recoveredCards.length} cards from local backup.`);
+                return recoveredCards;
+              }
+              return current;
+            });
+          }
+        } catch (e) {
+          console.error("Failed to parse local backup", e);
+        }
+      }
+    } else {
+      // Clear state on logout, but we might want to keep backup in localStorage just in case? 
+      // For security/privacy, let's NOT clear localStorage backup automatically on simple refresh, 
+      // but strictly on logout we usually clear user data.
       setCards([]);
       setDriveFileId(null);
       setSyncStatus('idle');
@@ -62,9 +107,11 @@ const App: React.FC = () => {
       setRewriteProgress(0);
       setRewrittenCount(0);
       setRewriteFailCount(0);
-      setView('scanner'); // Go back to scanner on sign out
+      setView('scanner');
     }
   }, [user]);
+
+  // --- END CRASH RECOVERY ---
   
   /**
    * Handles syncing with Google Drive.
@@ -122,8 +169,6 @@ const App: React.FC = () => {
       }
     }
   }, [user, getAccessToken]);
-
-  // REMOVED AUTO-SYNC USE EFFECT to restore manual control
 
   const saveCollectionToDrive = useCallback(async (cardsToSave: CardData[]) => {
     // Use silent=true for background saves too

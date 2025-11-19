@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { User } from '../types';
 
@@ -125,11 +126,10 @@ export const useGoogleAuth = () => {
       }
       
       // 3. Set Timeout (Prevent hanging forever)
-      // Extended to 2 minutes (120000ms) to allow ample time for user interaction
       const timeoutId = setTimeout(() => {
           inFlightTokenRequest.current = null;
           reject(new Error('Authentication timed out. Please try signing in again.'));
-      }, 120000);
+      }, 15000); // 15 second timeout
 
       tokenClient.callback = (tokenResponse: any) => {
         clearTimeout(timeoutId);
