@@ -124,52 +124,69 @@ const App: React.FC = () => {
       const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
       
-      // ** ROBUST DATA SANITIZATION **
-      // Filter out completely corrupt entries and ensure required fields exist with CORRECT TYPES
-      const validCards = loadedCards.filter((c: any) => c && typeof c === 'object').map((card: any) => {
-          // Safety checks for type consistency
-          const safeId = (typeof card.id === 'string' && card.id) ? card.id : generateId();
-          const safeStatus = (typeof card.status === 'string' && card.status) ? card.status : 'reviewed';
-          
-          // Ensure images are strings (even if empty)
-          const safeFront = (typeof card.frontImage === 'string') ? card.frontImage : '';
-          const safeBack = (typeof card.backImage === 'string') ? card.backImage : '';
-          
-          // Ensure grade is a number if present
-          let safeGrade = card.overallGrade;
-          if (safeGrade !== undefined && typeof safeGrade !== 'number') {
-              safeGrade = parseFloat(safeGrade);
-              if (isNaN(safeGrade)) safeGrade = undefined;
-          }
+      // ** AGGRESSIVE DATA SANITIZATION **
+      // Helper to force value to string or undefined (never object/null)
+      const safeString = (val: any): string | undefined => {
+          if (val === null || val === undefined) return undefined;
+          if (typeof val === 'string') return val;
+          if (typeof val === 'number') return String(val);
+          if (typeof val === 'object') return JSON.stringify(val); // Safe fallback for objects
+          return String(val);
+      };
 
-          // STRICTLY RECONSTRUCT THE OBJECT
-          // Do NOT use ...card (spread operator) because it copies hidden objects/garbage from old versions
-          // We force every display field to be a String or Undefined to prevent React render crashes.
-          return { 
-              id: safeId,
-              status: safeStatus as CardData['status'], 
-              frontImage: safeFront,
-              backImage: safeBack,
-              timestamp: typeof card.timestamp === 'number' ? card.timestamp : Date.now(),
-              gradingSystem: 'NGA' as const,
-              isSynced: true, // Mark as synced from drive
+      const validCards: CardData[] = [];
 
-              // Force string conversion for all display fields
-              name: card.name ? String(card.name) : undefined,
-              team: card.team ? String(card.team) : undefined,
-              set: card.set ? String(card.set) : undefined,
-              edition: card.edition ? String(card.edition) : undefined,
-              cardNumber: card.cardNumber ? String(card.cardNumber) : undefined,
-              company: card.company ? String(card.company) : undefined,
-              year: card.year ? String(card.year) : undefined,
-              summary: card.summary ? String(card.summary) : undefined,
-              errorMessage: card.errorMessage ? String(card.errorMessage) : undefined,
-              gradeName: card.gradeName ? String(card.gradeName) : undefined,
+      if (Array.isArray(loadedCards)) {
+          loadedCards.forEach((card: any, index) => {
+              if (!card || typeof card !== 'object') return;
               
-              overallGrade: safeGrade,
-              details: card.details // details is deep structure, usually safe, but handled by optional chaining in UI
-          };
-      });
+              try {
+                  // 1. ID & Status
+                  const safeId = safeString(card.id) || generateId();
+                  const safeStatus = safeString(card.status) || 'reviewed';
+                  
+                  // 2. Images (Critical: Ensure they are strings)
+                  const safeFront = typeof card.frontImage === 'string' ? card.frontImage : '';
+                  const safeBack = typeof card.backImage === 'string' ? card.backImage : '';
+
+                  // 3. Grade (Critical: Ensure Number)
+                  let safeGrade = card.overallGrade;
+                  if (safeGrade !== undefined && typeof safeGrade !== 'number') {
+                      safeGrade = parseFloat(safeGrade);
+                      if (isNaN(safeGrade)) safeGrade = undefined;
+                  }
+
+                  // 4. Construct Clean Object
+                  const cleanCard: CardData = {
+                      id: safeId,
+                      status: safeStatus as CardData['status'],
+                      frontImage: safeFront,
+                      backImage: safeBack,
+                      timestamp: typeof card.timestamp === 'number' ? card.timestamp : Date.now(),
+                      gradingSystem: 'NGA',
+                      isSynced: true,
+                      
+                      name: safeString(card.name),
+                      team: safeString(card.team),
+                      set: safeString(card.set),
+                      edition: safeString(card.edition),
+                      cardNumber: safeString(card.cardNumber),
+                      company: safeString(card.company),
+                      year: safeString(card.year),
+                      summary: safeString(card.summary),
+                      errorMessage: safeString(card.errorMessage),
+                      gradeName: safeString(card.gradeName),
+                      
+                      overallGrade: safeGrade,
+                      details: card.details // Deep object, accepted as is (optional chaining in UI handles safety)
+                  };
+                  
+                  validCards.push(cleanCard);
+              } catch (e) {
+                  console.error(`Error sanitizing card at index ${index}:`, e);
+              }
+          });
+      }
 
       setCards(validCards);
       setDriveFileId(fileId);
