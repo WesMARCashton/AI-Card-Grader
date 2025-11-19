@@ -47,19 +47,31 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
         const set = companyStr.toUpperCase() === setStr.toUpperCase() ? '' : setStr;
         const cardNumber = card.cardNumber ? `#${card.cardNumber}` : '';
         
+        // MAPPING UPDATE:
+        // Col A: Year
+        // Col B: Company
+        // Col C: Set (Smart - hidden if matches company)
+        // Col D: Name
+        // Col E: Edition
+        // Col F: Set (Raw - always included if exists)
+        // Col G: Card Number
+        // Col H: Grade Name (Status)
+        // Col I: Overall Grade
+        
         const stringValues = [
             card.year,
             card.company,
             set,
             card.name,
             card.edition,
-            cardNumber,
-            card.gradeName,
+            setStr, // Col F: Set
+            cardNumber, // Col G
+            card.gradeName, // Col H
         ].map(value => (value || '').toString().toUpperCase());
 
         return [
             ...stringValues,
-            card.overallGrade, // Grade
+            card.overallGrade, // Col I
         ];
     });
 
