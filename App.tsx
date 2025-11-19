@@ -125,20 +125,32 @@ const App: React.FC = () => {
       const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
       
-      // ** DATA MIGRATION STEP **
-      const migratedCards = loadedCards.map(card => {
-          if (!card.status) {
-              return { ...card, status: 'reviewed' as const };
-          }
-          return card;
+      // ** ROBUST DATA SANITIZATION **
+      // Filter out completely corrupt entries and ensure required fields exist
+      // This prevents the "White Screen" crash if old data is missing images or IDs
+      const validCards = loadedCards.filter(c => c && typeof c === 'object').map(card => {
+          const safeId = card.id || generateId();
+          const safeStatus = card.status || 'reviewed';
+          // Ensure images are strings (even if empty)
+          const safeFront = card.frontImage || '';
+          const safeBack = card.backImage || '';
+
+          return { 
+              ...card, 
+              id: safeId,
+              status: safeStatus as CardData['status'], 
+              frontImage: safeFront,
+              backImage: safeBack
+          };
       });
 
-      setCards(migratedCards);
+      setCards(validCards);
       setDriveFileId(fileId);
       setSyncStatus('success');
 
       if (!silent) {
-          alert(`Sync Complete! Found ${migratedCards.length} cards in your collection.`);
+          alert(`Sync Complete! Found ${validCards.length} cards in your collection.`);
+          setView('history'); // Auto-navigate to history so user sees the cards immediately
       }
 
     } catch (err: any) {
@@ -147,9 +159,8 @@ const App: React.FC = () => {
       // Handle interaction required specifically
       if (err.message === 'interaction_required') {
           if (silent) {
-              // If silent failed, just stop loading and maybe let user know they need to click sync
+              // If silent failed, just stop loading
               setSyncStatus('idle'); 
-              // Don't show a huge error for silent failure, just reset.
               return;
           }
       }
