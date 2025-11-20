@@ -75,6 +75,12 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
 
   const isProcessing = ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(card.status);
 
+  // Helper to format grade: shows 9.5 as "9.5" and 10 as "10" (instead of 10.0)
+  const formatGrade = (grade?: number) => {
+      if (grade === undefined) return '-';
+      return Number.isInteger(grade) ? grade.toString() : grade.toFixed(1);
+  };
+
   return (
     <div 
       key={card.id} 
@@ -98,7 +104,7 @@ const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => 
         <div className="text-right w-28">
           <p className="text-xs text-slate-500">GRADE</p>
           <p className="font-bold text-3xl text-blue-600">
-            {card.overallGrade !== undefined ? card.overallGrade.toFixed(0) : '-'}
+            {formatGrade(card.overallGrade)}
           </p>
           {getStatusIndicator()}
         </div>

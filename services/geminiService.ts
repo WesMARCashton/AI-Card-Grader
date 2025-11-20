@@ -225,7 +225,8 @@ const getAIClient = () => {
   
   // Priority 2: Local Dev Key
   if (!apiKey) {
-      apiKey = import.meta.env?.VITE_API_KEY;
+      // Fix: Cast import.meta to any to avoid TS error if ImportMeta is not fully typed
+      apiKey = (import.meta as any).env?.VITE_API_KEY;
   }
 
   // Priority 3: Manual Local Storage Key (Fallback)

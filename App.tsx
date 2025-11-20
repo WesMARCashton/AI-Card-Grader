@@ -271,7 +271,8 @@ const App: React.FC = () => {
           // Stage 2: Generate Summary for accepted card
           const summary = await generateCardSummary(frontImageBase64, backImageBase64, cardToProcess);
           finalCardData = { summary };
-          finalStatus = 'reviewed';
+          // Automatically chain to fetching value after summary is generated
+          finalStatus = 'fetching_value'; 
           break;
 
         case 'challenging':
@@ -288,7 +289,8 @@ const App: React.FC = () => {
             cardToProcess.overallGrade!, cardToProcess.gradeName!, () => {}
           );
           finalCardData = regeneratedData;
-          finalStatus = 'reviewed'; // Manual grades are accepted automatically
+          // Automatically fetch value after manual grade edit as well
+          finalStatus = 'fetching_value'; 
           break;
         
         case 'fetching_value':
