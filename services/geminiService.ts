@@ -352,7 +352,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-2.5-pro',
+            model: 'gemini-3-pro-preview', // Corrected model name
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -504,7 +504,7 @@ export const challengeGrade = async (
     onStatusUpdate('Re-evaluating card...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-2.5-pro',
+            model: 'gemini-3-pro-preview', // Corrected model name
             contents: { parts: [
                 { text: challengePrompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -618,7 +618,7 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate('Regenerating analysis report...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-2.5-pro',
+            model: 'gemini-3-pro-preview', // Corrected model name
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
