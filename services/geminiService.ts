@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
@@ -142,22 +143,6 @@ Each card is evaluated in five key areas, each worth up to 10 points (increments
 --- END OF NGA GRADING GUIDE ---
 `;
 
-const getGradeName = (grade: number): string => {
-    if (grade >= 10) return 'GEM MT';
-    if (grade >= 9.5) return 'MINT+';
-    if (grade >= 9) return 'MINT';
-    if (grade >= 8.5) return 'NM-MT+';
-    if (grade >= 8) return 'NM-MT';
-    if (grade >= 7.5) return 'NM+';
-    if (grade >= 7) return 'NM';
-    if (grade >= 6) return 'EX-MT';
-    if (grade >= 5) return 'EX';
-    if (grade >= 4) return 'VG-EX';
-    if (grade >= 3) return 'VG';
-    if (grade >= 2) return 'GOOD';
-    return 'POOR';
-};
-
 export interface CardIdentification {
     name: string;
     team: string;
@@ -168,23 +153,9 @@ export interface CardIdentification {
     year: string;
 }
 
+// Always use new GoogleGenAI({apiKey: process.env.API_KEY});
 const getAIClient = () => {
-  const env = (window as any).env;
-  let apiKey = env?.VITE_API_KEY;
-  if (!apiKey) {
-      apiKey = (import.meta as any).env?.VITE_API_KEY;
-  }
-  if (!apiKey) {
-      apiKey = localStorage.getItem('gemini_api_key');
-  }
-  if (!apiKey) {
-      throw new Error("API_KEY_MISSING");
-  }
-  return new GoogleGenAI({ apiKey });
-};
-
-export const saveManualApiKey = (key: string) => {
-    localStorage.setItem('gemini_api_key', key);
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<CardIdentification> => {
@@ -210,7 +181,8 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            // Basic Text Tasks (e.g., identification and simple Q&A): 'gemini-3-flash-preview'
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -264,6 +236,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
+            // Complex Text Tasks (e.g., advanced reasoning like grading): 'gemini-3-pro-preview'
             model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
@@ -309,7 +282,8 @@ export const generateCardSummary = async (
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            // Basic Text Tasks (e.g., summarization): 'gemini-3-flash-preview'
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -374,6 +348,7 @@ export const challengeGrade = async (
     onStatusUpdate('Re-evaluating card...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
+            // Complex Text Tasks (e.g., advanced reasoning): 'gemini-3-pro-preview'
             model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: challengePrompt },
@@ -441,6 +416,7 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate('Regenerating analysis report...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
+            // Complex Text Tasks (e.g., advanced reasoning): 'gemini-3-pro-preview'
             model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
@@ -478,7 +454,8 @@ export const getCardMarketValue = async (
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            // Search Grounding example uses 'gemini-3-flash-preview'
+            model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
             config: {
                 tools: [{ googleSearch: {} }], 

@@ -2,12 +2,22 @@ import { CardData } from '../types';
 
 const SHEETS_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
 
+// Header definitions for the Google Sheet
+const SHEET_HEADERS = [
+    'YEAR', 'COMPANY', 'SET', 'NAME', 'EDITION', 'NUMBER', 'GRADE NAME', 'GRADE',
+    'CENTERING GRADE', 'CENTERING NOTES',
+    'CORNERS GRADE', 'CORNERS NOTES',
+    'EDGES GRADE', 'EDGES NOTES',
+    'SURFACE GRADE', 'SURFACE NOTES',
+    'PRINT QUALITY GRADE', 'PRINT QUALITY NOTES',
+    'SUMMARY', 'ESTIMATED VALUE', 'SOURCES'
+];
+
 // Extracts the spreadsheet ID from a Google Sheet URL
 const getSheetIdFromUrl = (url: string): string | null => {
     const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
     return match ? match[1] : null;
 };
-
 
 export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsToSync: CardData[]): Promise<void> => {
     const spreadsheetId = getSheetIdFromUrl(sheetUrl);
@@ -26,23 +36,30 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
 
     if (!sheetMetaResponse.ok) {
         const error = await sheetMetaResponse.json();
-        console.error("Google Sheets API (get metadata) error:", error);
         throw new Error(error.error?.message || "Could not retrieve spreadsheet details. Check URL and permissions.");
     }
 
     const sheetMetaData = await sheetMetaResponse.json();
-    if (!sheetMetaData.sheets || sheetMetaData.sheets.length === 0) {
-        throw new Error("The specified spreadsheet contains no sheets.");
-    }
     const firstSheetName = sheetMetaData.sheets[0].properties.title;
 
-    // 2. Format the new card data into rows
+    // 2. Check if the sheet is empty to decide if we need headers
+    const checkResponse = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/'${encodeURIComponent(firstSheetName)}'!A1:A1`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    
+    const checkData = await checkResponse.json();
+    const needsHeaders = !checkData.values || checkData.values.length === 0;
+
+    // 3. Format the data into rows
+    const rowsToAppend = [];
+    
+    if (needsHeaders) {
+        rowsToAppend.push(SHEET_HEADERS);
+    }
+
     const newRows = cardsToSync.sort((a,b) => a.timestamp - b.timestamp).map(card => {
-        // Safely handle potential undefined values before manipulation
         const company = (card.company || '').toString();
         const cardSet = (card.set || '').toString();
-        
-        // Only hide set if it perfectly matches company
         const set = company.toUpperCase() === cardSet.toUpperCase() ? '' : cardSet;
         const cardNumber = card.cardNumber ? `#${card.cardNumber}` : '';
         
@@ -56,7 +73,6 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
             card.gradeName,
         ].map(value => (value || '').toString().toUpperCase());
 
-        // Extract subgrades safely
         const d = card.details;
         const subgrades = [
             d?.centering?.grade, d?.centering?.notes,
@@ -66,15 +82,22 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
             d?.printQuality?.grade, d?.printQuality?.notes,
         ];
 
+        const marketVal = card.marketValue ? `${card.marketValue.currency} ${card.marketValue.averagePrice}` : 'N/A';
+        const sources = card.marketValue?.sourceUrls.map(s => s.uri).join(', ') || '';
+
         return [
             ...stringValues,
-            card.overallGrade, // Grade
+            card.overallGrade, 
             ...subgrades,
-            card.summary || ''
+            card.summary || '',
+            marketVal,
+            sources
         ];
     });
 
-    // 3. Append the new data to the sheet.
+    rowsToAppend.push(...newRows);
+
+    // 4. Append the data
     const appendRange = `'${firstSheetName}'`;
     const appendResponse = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/${encodeURIComponent(appendRange)}:append?valueInputOption=USER_ENTERED`, {
         method: 'POST',
@@ -82,12 +105,11 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ values: newRows })
+        body: JSON.stringify({ values: rowsToAppend })
     });
     
     if (!appendResponse.ok) {
         const error = await appendResponse.json();
-        console.error("Google Sheets API (append) error:", error);
         throw new Error(error.error?.message || "Failed to write data to the Google Sheet.");
     }
 };
