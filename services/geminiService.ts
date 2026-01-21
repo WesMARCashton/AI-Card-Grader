@@ -42,13 +42,18 @@ const handleGeminiError = (error: any, context: string): Error => {
         } catch (e) { /* Ignore */ }
     }
 
+    // Fix: Handle specific error for resetting key selection (Requested entity was not found)
+    if (originalErrorMessage.toLowerCase().includes('requested entity was not found')) {
+        return new Error("API_KEY_RESET_REQUIRED");
+    }
+
     if (originalErrorMessage.toLowerCase().includes('model is overloaded')) {
         userFriendlyMessage = "The AI model is currently overloaded. Please wait a moment and try again.";
     } else if (error instanceof SyntaxError || originalErrorMessage.includes('JSON')) {
         userFriendlyMessage = "The AI returned an invalid response. This can be intermittent. Please try again.";
     } else if (originalErrorMessage.toLowerCase().includes('fetch')) {
         userFriendlyMessage = "A network error occurred. Please check your internet connection and try again.";
-    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing') || originalErrorMessage.includes('API_KEY_MISSING')) {
+    } else if (originalErrorMessage.includes('api key') || originalErrorMessage.includes('API Key is missing') || originalErrorMessage.includes('API_KEY_MISSING') || originalErrorMessage.includes('401')) {
         return new Error("API_KEY_MISSING"); 
     } else {
         userFriendlyMessage = `An unexpected error occurred: ${originalErrorMessage}`;
@@ -78,6 +83,11 @@ const withRetry = async <T>(
             originalErrorMessage = parsedError.error.message;
           }
         } catch (e) { /* Ignore */ }
+      }
+
+      // Fix: Don't retry if a specific key reset is required, instead propagate it
+      if (originalErrorMessage.toLowerCase().includes('requested entity was not found')) {
+          throw handleGeminiError(error, context);
       }
 
       const isRetryable = originalErrorMessage.toLowerCase().includes('model is overloaded') ||
@@ -153,12 +163,13 @@ export interface CardIdentification {
     year: string;
 }
 
-// Always use new GoogleGenAI({apiKey: process.env.API_KEY});
+// Fix: Strictly use process.env.API_KEY as the exclusive source.
 const getAIClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<CardIdentification> => {
+    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const prompt = `
       **Task:** Identify the sports card from the provided images.
@@ -181,7 +192,6 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Basic Text Tasks (e.g., identification and simple Q&A): 'gemini-3-flash-preview'
             model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
@@ -200,6 +210,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 };
 
 export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
+    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const prompt = `
       **Task:** Perform a STRICT NGA grading analysis. Support half-points (e.g., 9.5).
@@ -236,7 +247,6 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Complex Text Tasks (e.g., advanced reasoning like grading): 'gemini-3-pro-preview'
             model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
@@ -259,6 +269,7 @@ export const generateCardSummary = async (
     backImageBase64: string, 
     cardData: Partial<CardData>
 ): Promise<string> => {
+    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const prompt = `
       **Task:** Write a professional NGA grading summary for this card.
@@ -282,7 +293,6 @@ export const generateCardSummary = async (
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Basic Text Tasks (e.g., summarization): 'gemini-3-flash-preview'
             model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
@@ -308,6 +318,7 @@ export const challengeGrade = async (
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
     onStatusUpdate('Initializing AI model for challenge...');
+    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
 
     const challengePrompt = `
@@ -348,7 +359,6 @@ export const challengeGrade = async (
     onStatusUpdate('Re-evaluating card...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Complex Text Tasks (e.g., advanced reasoning): 'gemini-3-pro-preview'
             model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: challengePrompt },
@@ -382,6 +392,7 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string }> => {
     onStatusUpdate('Initializing AI model for analysis...');
+    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
 
     const prompt = `
@@ -416,7 +427,6 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate('Regenerating analysis report...');
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Complex Text Tasks (e.g., advanced reasoning): 'gemini-3-pro-preview'
             model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
@@ -442,6 +452,7 @@ export const regenerateCardAnalysisForGrade = async (
 export const getCardMarketValue = async (
     card: CardData
 ): Promise<MarketValue> => {
+    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const gradeSearchTerm = card.gradeName ? `Grade ${card.overallGrade} ${card.gradeName}` : `Grade ${card.overallGrade}`;
     const cardSearchTerm = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} ${card.edition} ${gradeSearchTerm}`;
@@ -454,7 +465,6 @@ export const getCardMarketValue = async (
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Search Grounding example uses 'gemini-3-flash-preview'
             model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
             config: {

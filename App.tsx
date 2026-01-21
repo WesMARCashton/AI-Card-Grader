@@ -15,7 +15,7 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
-import { HistoryIcon, KeyIcon } from './components/icons';
+import { HistoryIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { SyncSheetModal } from './components/SyncSheetModal';
 
@@ -27,8 +27,6 @@ const generateId = () => {
   }
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
-
-// Redundant global augmentation removed. It is now centralized in types.ts to avoid modifier and type conflicts.
 
 const App: React.FC = () => {
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
@@ -143,12 +141,20 @@ const App: React.FC = () => {
     }
   }, [user, getAccessToken, driveFileId]);
   
+  // Fix: Strictly rely on aistudio.openSelectKey() and remove manual API key UI.
   const handleOpenApiKeyDialog = async () => {
     if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-    } else {
-      alert("API Key selection is not available in this environment.");
+      try {
+        await window.aistudio.openSelectKey();
+      } catch (e) {
+        console.error("Failed to open AI Studio key dialog", e);
+      }
     }
+  };
+
+  const checkHasApiKey = async () => {
+    if (window.aistudio) return await window.aistudio.hasSelectedApiKey();
+    return true; // Assume standard process.env.API_KEY is present otherwise
   };
 
   const processCardInBackground = useCallback(async (cardToProcess: CardData) => {
@@ -156,10 +162,12 @@ const App: React.FC = () => {
     processingCards.current.add(cardToProcess.id);
   
     try {
-      // Check if API key is set before processing
-      if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
+      // Fix: Check for key selection exclusively via aistudio.
+      const hasKey = await checkHasApiKey();
+      if (!hasKey) {
         setError("Please select an API key to continue grading.");
         processingCards.current.delete(cardToProcess.id);
+        await handleOpenApiKeyDialog();
         setCards(current => current.map(c => c.id === cardToProcess.id ? { ...c, status: 'grading_failed' as const, errorMessage: "API Key Required" } : c));
         return;
       }
@@ -208,13 +216,13 @@ const App: React.FC = () => {
         return updated;
       });
     } catch (err: any) {
-      const errMsg = err.message || "";
-      // If API key issues are detected, trigger the key selection dialog and update status
-      if (errMsg.includes("Requested entity was not found") || errMsg.includes("401")) {
-         setError("API Key Error. Please click the Key icon in the header to re-select a valid API key.");
-         if (window.aistudio) {
-             window.aistudio.openSelectKey();
-         }
+      // Fix: Handle API_KEY_RESET_REQUIRED as per guidelines.
+      if (err.message === 'API_KEY_RESET_REQUIRED') {
+         setError("API access failed. Please re-select your paid project API key.");
+         await handleOpenApiKeyDialog();
+      } else if (err.message === 'API_KEY_MISSING') {
+         setError("Invalid or Missing API Key. Please re-select your project key.");
+         await handleOpenApiKeyDialog();
       }
       setCards(current => {
         const updated = current.map(card => card.id === cardToProcess.id ? { ...card, status: 'grading_failed' as const, errorMessage: err.message } : card);
@@ -233,8 +241,8 @@ const App: React.FC = () => {
   }, [cards, processCardInBackground]);
 
   const handleRatingRequest = useCallback(async (f: string, b: string) => {
-    // Immediate check for API key
-    if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
+    const hasKey = await checkHasApiKey();
+    if (!hasKey) {
       await handleOpenApiKeyDialog();
     }
 
@@ -320,13 +328,6 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2">
                 {user && (
                   <>
-                    <button 
-                      onClick={handleOpenApiKeyDialog} 
-                      className="p-2 text-slate-500 hover:text-blue-600 rounded-full hover:bg-slate-100 transition-colors"
-                      title="Manage Gemini API Key"
-                    >
-                      <KeyIcon className="w-5 h-5" />
-                    </button>
                     <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
                       <HistoryIcon className="h-5 w-5" />
                       <span className="hidden sm:inline">{view === 'history' ? 'Scanner' : `Collection (${cards.length})`}</span>

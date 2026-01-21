@@ -10,8 +10,8 @@ declare global {
     env: {
       VITE_API_KEY: string;
     };
-    // Use the explicit AIStudio type to prevent subsequent declaration conflicts
-    aistudio: AIStudio;
+    // Fix: Made aistudio optional to ensure identical modifiers across declarations (Line 15)
+    aistudio?: AIStudio;
   }
 }
 
