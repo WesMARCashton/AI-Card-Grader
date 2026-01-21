@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -15,11 +14,13 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
-import { HistoryIcon } from './components/icons';
+import { HistoryIcon, KeyIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { SyncSheetModal } from './components/SyncSheetModal';
+import { ApiKeyModal } from './components/ApiKeyModal';
 
 const BACKUP_KEY = 'nga_card_backup';
+const MANUAL_KEY_STORAGE = 'nga_manual_api_key';
 
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -45,6 +46,7 @@ const App: React.FC = () => {
   const [rewriteStatusMessage, setRewriteStatusMessage] = useState('');
   
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
   const [cardsToResyncManually, setCardsToResyncManually] = useState<CardData[]>([]);
 
   const processingCards = useRef(new Set<string>());
@@ -141,20 +143,26 @@ const App: React.FC = () => {
     }
   }, [user, getAccessToken, driveFileId]);
   
-  // Fix: Strictly rely on aistudio.openSelectKey() and remove manual API key UI.
+  /**
+   * Intelligently open the key selection UI. 
+   * Tries official aistudio dialog first, falls back to manual modal.
+   */
   const handleOpenApiKeyDialog = async () => {
     if (window.aistudio) {
       try {
         await window.aistudio.openSelectKey();
       } catch (e) {
-        console.error("Failed to open AI Studio key dialog", e);
+        setIsApiKeyModalOpen(true);
       }
+    } else {
+      setIsApiKeyModalOpen(true);
     }
   };
 
   const checkHasApiKey = async () => {
+    if (localStorage.getItem(MANUAL_KEY_STORAGE)) return true;
     if (window.aistudio) return await window.aistudio.hasSelectedApiKey();
-    return true; // Assume standard process.env.API_KEY is present otherwise
+    return false;
   };
 
   const processCardInBackground = useCallback(async (cardToProcess: CardData) => {
@@ -162,12 +170,11 @@ const App: React.FC = () => {
     processingCards.current.add(cardToProcess.id);
   
     try {
-      // Fix: Check for key selection exclusively via aistudio.
       const hasKey = await checkHasApiKey();
       if (!hasKey) {
-        setError("Please select an API key to continue grading.");
+        setError("Please provide an API key to continue grading.");
         processingCards.current.delete(cardToProcess.id);
-        await handleOpenApiKeyDialog();
+        setIsApiKeyModalOpen(true);
         setCards(current => current.map(c => c.id === cardToProcess.id ? { ...c, status: 'grading_failed' as const, errorMessage: "API Key Required" } : c));
         return;
       }
@@ -216,12 +223,8 @@ const App: React.FC = () => {
         return updated;
       });
     } catch (err: any) {
-      // Fix: Handle API_KEY_RESET_REQUIRED as per guidelines.
-      if (err.message === 'API_KEY_RESET_REQUIRED') {
-         setError("API access failed. Please re-select your paid project API key.");
-         await handleOpenApiKeyDialog();
-      } else if (err.message === 'API_KEY_MISSING') {
-         setError("Invalid or Missing API Key. Please re-select your project key.");
+      if (err.message === 'API_KEY_RESET_REQUIRED' || err.message === 'API_KEY_MISSING') {
+         setError("API access failed. Please re-select or re-enter your API key.");
          await handleOpenApiKeyDialog();
       }
       setCards(current => {
@@ -287,6 +290,12 @@ const App: React.FC = () => {
       }
   }, [getAccessToken]);
 
+  const handleSaveManualApiKey = (key: string) => {
+      localStorage.setItem(MANUAL_KEY_STORAGE, key);
+      setIsApiKeyModalOpen(false);
+      setError(null);
+  };
+
   const renderView = () => {
     switch (view) {
       case 'history':
@@ -328,6 +337,13 @@ const App: React.FC = () => {
               <div className="flex items-center gap-2">
                 {user && (
                   <>
+                    <button 
+                      onClick={handleOpenApiKeyDialog} 
+                      className="p-2 text-slate-500 hover:text-blue-600 rounded-full hover:bg-slate-100 transition-colors"
+                      title="Manage Gemini API Key"
+                    >
+                      <KeyIcon className="w-5 h-5" />
+                    </button>
                     <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
                       <HistoryIcon className="h-5 w-5" />
                       <span className="hidden sm:inline">{view === 'history' ? 'Scanner' : `Collection (${cards.length})`}</span>
@@ -352,6 +368,12 @@ const App: React.FC = () => {
                 onClose={() => { setIsSyncModalOpen(false); setCardsToResyncManually([]); }}
                 getAccessToken={() => getAccessToken(false)}
                 onSyncSuccess={handleCardsSynced}
+              />
+            )}
+            {isApiKeyModalOpen && (
+              <ApiKeyModal 
+                onSave={handleSaveManualApiKey}
+                onClose={() => setIsApiKeyModalOpen(false)}
               />
             )}
         </main>

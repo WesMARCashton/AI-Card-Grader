@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
@@ -42,7 +41,7 @@ const handleGeminiError = (error: any, context: string): Error => {
         } catch (e) { /* Ignore */ }
     }
 
-    // Fix: Handle specific error for resetting key selection (Requested entity was not found)
+    // Handle specific error for resetting key selection
     if (originalErrorMessage.toLowerCase().includes('requested entity was not found')) {
         return new Error("API_KEY_RESET_REQUIRED");
     }
@@ -85,7 +84,6 @@ const withRetry = async <T>(
         } catch (e) { /* Ignore */ }
       }
 
-      // Fix: Don't retry if a specific key reset is required, instead propagate it
       if (originalErrorMessage.toLowerCase().includes('requested entity was not found')) {
           throw handleGeminiError(error, context);
       }
@@ -163,13 +161,20 @@ export interface CardIdentification {
     year: string;
 }
 
-// Fix: Strictly use process.env.API_KEY as the exclusive source.
+/**
+ * Returns either the manually set key from localStorage or the environment injected key.
+ * This ensures the app works on custom domains where process.env.API_KEY might be empty.
+ */
+const getEffectiveApiKey = () => {
+  return localStorage.getItem('nga_manual_api_key') || process.env.API_KEY || '';
+};
+
 const getAIClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const apiKey = getEffectiveApiKey();
+  return new GoogleGenAI({ apiKey });
 };
 
 export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<CardIdentification> => {
-    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const prompt = `
       **Task:** Identify the sports card from the provided images.
@@ -210,7 +215,6 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 };
 
 export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
-    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const prompt = `
       **Task:** Perform a STRICT NGA grading analysis. Support half-points (e.g., 9.5).
@@ -269,7 +273,6 @@ export const generateCardSummary = async (
     backImageBase64: string, 
     cardData: Partial<CardData>
 ): Promise<string> => {
-    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const prompt = `
       **Task:** Write a professional NGA grading summary for this card.
@@ -318,7 +321,6 @@ export const challengeGrade = async (
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
     onStatusUpdate('Initializing AI model for challenge...');
-    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
 
     const challengePrompt = `
@@ -392,7 +394,6 @@ export const regenerateCardAnalysisForGrade = async (
     onStatusUpdate: (status: string) => void
 ): Promise<{ details: EvaluationDetails, summary: string }> => {
     onStatusUpdate('Initializing AI model for analysis...');
-    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
 
     const prompt = `
@@ -452,7 +453,6 @@ export const regenerateCardAnalysisForGrade = async (
 export const getCardMarketValue = async (
     card: CardData
 ): Promise<MarketValue> => {
-    // Fix: Instantiate client right before use to ensure up-to-date API key
     const ai = getAIClient();
     const gradeSearchTerm = card.gradeName ? `Grade ${card.overallGrade} ${card.gradeName}` : `Grade ${card.overallGrade}`;
     const cardSearchTerm = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} ${card.edition} ${gradeSearchTerm}`;
