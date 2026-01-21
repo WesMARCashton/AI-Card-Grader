@@ -74,36 +74,32 @@ const safetySettings = [
 
 const NGA_GRADING_STANDARDS = `
 --- START OF NGA GRADING STANDARDS ---
-**CARD GRADING SYSTEM (Allows Half-Points e.g. 9.5, 8.5)**
+**STRICT PROFESSIONAL GRADING ONLY**
 
 **Evaluation Categories (Subgrades)**
-- **Centering (25%):** Border alignment. 10=50/50 to 55/45. 9=60/40. 8=65/35.
-- **Corners (25%):** Sharpness. 10=Perfect. 9.5=Hint of white under high magnification. 9=Slightly soft corner. 8=Visible rounding.
-- **Edges (20%):** Border uniformity. 10=Zero nicks. 9=Minor chipping or silvering.
-- **Surface (20%):** Gloss/Imperfections. 10=Flawless. 9.5=One microscopic line. 9=Visible scratch or print line.
-- **Print Quality (10%):** Registration and focus. 10=Sharp. 9=Slight blur or snow.
+- **Centering (25%):** Border alignment. 10=50/50. 9=60/40. 8=65/35.
+- **Corners (25%):** Sharpness. 10=Razor. 9.5=Hint of white. 9=Soft corner. 8=Rounded.
+- **Edges (20%):** Border uniformity. 10=Zero nicks. 9=Minor silvering.
+- **Surface (20%):** Gloss/Flaws. 10=Flawless. 9.5=One micro-line. 9=Scratch.
+- **Print Quality (10%):** Registration.
 
-**MANDATORY PENALTY RULES**
-1. **Creases:** If ANY crease is visible, the card is AUTOMATICALLY capped at a maximum overall grade of 5.0.
-2. **Surface/Corners Flaws:** If Surface or Corners subgrade is below 6.0, the Overall Grade is capped at a maximum of 6.0.
-3. **Calculated Average:** Average the subgrades. 
-   - Round to nearest 0.5. 
-   - If the average ends in .25, round DOWN to .0.
-   - If the average ends in .75, round DOWN to .5.
-4. **Significant Deviation:** If one subgrade is 2 or more points lower than the others, reduce the overall grade by an additional 0.5.
+**LOGIC RULES:**
+- If Average ends in .25, round DOWN.
+- If Average ends in .75, round DOWN to .5.
+- **CREASE PENALTY:** Any crease caps card at 5.0.
+- **LOW QUALITY PENALTY:** Surface/Corners < 6.0 caps overall at 6.0.
 
-**CRITICAL INSTRUCTION:** Do not default to 9.5. Be extremely critical. Look for "whitening" on back corners, "refractor lines" on surface, and "softening" on corners. Most modern cards are an 8 or 9. A 10 should be near-impossible to achieve.
+**INSTRUCTION:** Hunt for flaws. Do not default to 9.5. Most cards are 8s or 9s. Be extremely cynical. If you cannot see the back of the card, assume standard wear.
 --- END OF NGA GRADING STANDARDS ---
 `;
 
-// Fix: Use process.env.API_KEY directly as required by guidelines.
 const getAIClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 };
 
 export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<any> => {
     const ai = getAIClient();
-    const prompt = `Identify this sports card. Strictly output valid JSON only. JSON: { "name": string, "team": string, "year": string, "set": string, "company": string, "cardNumber": string, "edition": string }`;
+    const prompt = `Identify this sports card exactly. Strictly output valid JSON only: { "name": string, "team": string, "year": string, "set": string, "company": string, "cardNumber": string, "edition": string }`;
     
     const responseSchema = {
       type: Type.OBJECT,
@@ -119,7 +115,6 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
       required: ['name', 'team', 'year', 'set', 'company', 'cardNumber', 'edition']
     };
 
-    // Fix: Move safetySettings inside the config object.
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-pro-preview',
@@ -142,7 +137,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
 export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `Act as a cynical, highly critical professional sports card grader. Use these strict standards: ${NGA_GRADING_STANDARDS}. Examine the images for even the smallest imperfections. Output JSON matching the schema.`;
+    const prompt = `Perform a cynical, flaw-focused NGA analysis of this card. ${NGA_GRADING_STANDARDS} Output valid JSON only.`;
 
     const subGradeSchema = {
       type: Type.OBJECT,
@@ -169,7 +164,6 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
       required: ['details', 'overallGrade', 'gradeName'],
     };
 
-    // Fix: Move safetySettings inside the config object.
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-pro-preview', 
@@ -192,10 +186,9 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
 export const generateCardSummary = async (frontImageBase64: string, backImageBase64: string, cardData: Partial<CardData>): Promise<string> => {
     const ai = getAIClient();
-    const prompt = `Explain why this card received a grade of ${cardData.overallGrade}. Mention specific subgrades from: ${JSON.stringify(cardData.details)}. Be professional and objective. Output JSON only: { "summary": string }`;
+    const prompt = `Write a 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. JSON: { "summary": string }`;
     const responseSchema = { type: Type.OBJECT, properties: { summary: { type: Type.STRING } }, required: ['summary'] };
 
-    // Fix: Move safetySettings inside the config object.
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-flash-preview',
@@ -218,7 +211,7 @@ export const generateCardSummary = async (frontImageBase64: string, backImageBas
 
 export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `Review this card. The user challenges the initial grade as being too ${direction}. Re-evaluate strictly using NGA Standards: ${NGA_GRADING_STANDARDS}. Output JSON only. Current: ${JSON.stringify(card.details)}`;
+    const prompt = `The user challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate using: ${NGA_GRADING_STANDARDS}. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -238,7 +231,6 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
     const frontImageBase64 = dataUrlToBase64(card.frontImage);
     const backImageBase64 = dataUrlToBase64(card.backImage);
     
-    // Fix: Move safetySettings inside the config object.
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-pro-preview',
@@ -260,7 +252,7 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
 
 export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, backImageBase64: string, cardInfo: any, targetGrade: number, targetGradeName: string, onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string }> => {
     const ai = getAIClient();
-    const prompt = `Justify a specific target grade of ${targetGrade} (${targetGradeName}) for this card using NGA standards. Find flaws to support this grade. Output JSON only.`;
+    const prompt = `Justify a manual grade of ${targetGrade} (${targetGradeName}) for this card using NGA rules. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -275,7 +267,6 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
       required: ['details', 'summary'],
     };
 
-    // Fix: Move safetySettings inside the config object.
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-pro-preview',
@@ -298,9 +289,8 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
-    const prompt = `Find recent sold price data for: "${query}". Output JSON only: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string }.`;
+    const prompt = `Find recent eBay/Goldin/Heritage sold data for: "${query}". Output JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string }.`;
 
-    // Fix: Move safetySettings inside the config object.
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
             model: 'gemini-3-flash-preview',
