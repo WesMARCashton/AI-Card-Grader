@@ -77,24 +77,22 @@ const NGA_GRADING_STANDARDS = `
 **STRICT PROFESSIONAL GRADING ONLY**
 
 **Evaluation Categories (Subgrades)**
-- **Centering (25%):** Border alignment. 10=50/50. 9=60/40. 8=65/35. 
-- **Corners (25%):** Sharpness. 10=Razor Sharp (perfect). 9.5=Hint of white under 10x magnification. 9=Soft corner. 8=Rounded. 7=Dented.
-- **Edges (20%):** Border uniformity. 10=Zero nicks. 9=Minor silvering. 8=Multiple nicks.
-- **Surface (20%):** Gloss/Flaws. 10=Flawless. 9.5=One micro-line. 9=Scratch or print line. 8=Pitting or stain.
-- **Print Quality (10%):** Focus and Registration.
+- **Centering (25%):** Alignment of borders. 10=50/50. 9=60/40. 8=65/35. 7=70/30 or worse.
+- **Corners (25%):** Physical integrity. 10=Razor sharp. 9.5=Hint of white under high magnification. 9=Soft corner visible. 8=Rounded corners. 7=Corner dent/crease.
+- **Edges (20%):** Smoothness of the cut. 10=Zero nicks. 9=Minor silvering/chipping. 8=Visible rough cut or multiple nicks.
+- **Surface (20%):** Perfection of the printing and finish. 10=Flawless. 9.5=One micro-line or print dot. 9=Visible scratch, smudge, or print lines. 8=Staining, pitting, or multiple scratches.
+- **Print Quality (10%):** Clarity and Registration.
 
 **LOGIC RULES:**
-- If Average ends in .25, round DOWN to .0.
-- If Average ends in .75, round DOWN to .5.
-- **CREASE PENALTY:** Any crease (even microscopic) caps card at 5.0.
-- **LOW QUALITY PENALTY:** If any subgrade is < 6.0, the overall grade is capped at 6.0.
+- If Average ends in .25, round DOWN to the nearest .0.
+- If Average ends in .75, round DOWN to the nearest .5.
+- **CREASE PENALTY:** Any crease (even a faint surface wrinkle) caps the overall grade at 5.0.
+- **LOW QUALITY PENALTY:** If any subgrade is < 6.0, the overall grade is automatically capped at 6.0.
 
-**INSTRUCTION:** Hunt for flaws. Do not default to 9.5. Most cards are 8s or 9s. Be extremely cynical. Awarding a 10 should feel like a rare event. Look specifically for whitening on the back corners and edge chipping.
+**INSTRUCTION:** Hunt for flaws. Do not default to 9.5. Most cards are 8s or 9s. Be extremely cynical. Awarding a 10 should be near-impossible. Look specifically for whitening on the back corners and edge chipping. If you see ANY imperfection, the subgrade MUST drop below 10.
 --- END OF NGA GRADING STANDARDS ---
 `;
 
-// As per instructions: "The API key must be obtained exclusively from the environment variable process.env.API_KEY."
-// and "Create a new GoogleGenAI instance right before making an API call"
 const getAIClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 };
@@ -139,7 +137,7 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
 export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `Perform a cynical, flaw-focused NGA analysis of this card. ${NGA_GRADING_STANDARDS} Output valid JSON only.`;
+    const prompt = `Perform a cynical, highly critical NGA analysis of this card. ${NGA_GRADING_STANDARDS} Examine the high-resolution images carefully for whitening, centering issues, and surface scratches. Output valid JSON only.`;
 
     const subGradeSchema = {
       type: Type.OBJECT,
@@ -188,7 +186,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
 export const generateCardSummary = async (frontImageBase64: string, backImageBase64: string, cardData: Partial<CardData>): Promise<string> => {
     const ai = getAIClient();
-    const prompt = `Write a professional 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. Mention visible flaws if the grade is below 9.5. JSON: { "summary": string }`;
+    const prompt = `Write a professional 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. Be critical and mention specific flaws identified. JSON: { "summary": string }`;
     const responseSchema = { type: Type.OBJECT, properties: { summary: { type: Type.STRING } }, required: ['summary'] };
 
     const response = await withRetry<GenerateContentResponse>(
@@ -213,7 +211,7 @@ export const generateCardSummary = async (frontImageBase64: string, backImageBas
 
 export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `The user challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate using: ${NGA_GRADING_STANDARDS}. JSON output only.`;
+    const prompt = `The user challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate using: ${NGA_GRADING_STANDARDS}. Search for more subtle flaws or strengths. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -254,7 +252,7 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
 
 export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, backImageBase64: string, cardInfo: any, targetGrade: number, targetGradeName: string, onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string }> => {
     const ai = getAIClient();
-    const prompt = `Justify a manual grade of ${targetGrade} (${targetGradeName}) for this card using NGA rules. JSON output only.`;
+    const prompt = `Justify a manual grade of ${targetGrade} (${targetGradeName}) for this card using NGA rules. Find supporting flaws in the images for this grade. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,

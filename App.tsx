@@ -15,7 +15,6 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { syncToSheet } from './services/sheetsService';
-// Fix: Added SpinnerIcon to the imports from ./components/icons
 import { HistoryIcon, KeyIcon, SpinnerIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { SyncSheetModal } from './components/SyncSheetModal';
@@ -48,46 +47,16 @@ const App: React.FC = () => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [cardsToResyncManually, setCardsToResyncManually] = useState<CardData[]>([]);
 
-  // API Key State - initialized to null to show a blank state while checking
-  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
-
   const processingCards = useRef(new Set<string>());
   const CONCURRENCY_LIMIT = 2;
 
-  // Initial key check - following "API Key Selection" instructions strictly
-  useEffect(() => {
-    const checkApiKey = async () => {
-      try {
-        // As per instructions: "Use await window.aistudio.hasSelectedApiKey() to check"
-        // We assume it exists. If it's missing in a specific runtime, we catch and assume true.
-        if (window.aistudio) {
-          const has = await window.aistudio.hasSelectedApiKey();
-          setHasApiKey(has);
-        } else {
-          setHasApiKey(true);
-        }
-      } catch (e) {
-        console.warn("API Key selection check failed, assuming configured environment:", e);
-        setHasApiKey(true);
-      }
-    };
-    checkApiKey();
-  }, []);
-
   const handleOpenKeySelector = async () => {
-    try {
-      // As per instructions: "add a button which calls await window.aistudio.openSelectKey()"
-      if (window.aistudio) {
+    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+      try {
         await window.aistudio.openSelectKey();
-        // As per instructions: "you MUST assume the key selection was successful after triggering openSelectKey() and proceed to the app"
-        setHasApiKey(true);
-      } else {
-        alert("API Key selection is not available in this environment. Using default environment key.");
-        setHasApiKey(true);
+      } catch (e) {
+        console.error("Platform key selector failed:", e);
       }
-    } catch (e) {
-      console.error("Error opening key selector:", e);
-      setHasApiKey(true);
     }
   };
 
@@ -231,9 +200,9 @@ const App: React.FC = () => {
         return updated;
       });
     } catch (err: any) {
-      // As per instructions: "If the request fails with an error message containing 'Requested entity was not found.', reset the key selection state"
+      // If requested entity was not found, prompt for key selection
       if (err.message?.includes("Requested entity was not found.")) {
-        setHasApiKey(false);
+        handleOpenKeySelector();
       }
       setCards(current => {
         const updated = current.map(card => card.id === cardToProcess.id ? { ...card, status: 'grading_failed' as const, errorMessage: err.message } : card);
@@ -293,53 +262,41 @@ const App: React.FC = () => {
       }
   }, [getAccessToken]);
 
-  const renderView = () => {
-    // Show a loading or splash screen while we determine if an API key is selected
-    if (hasApiKey === null) {
-        return (
-            <div className="flex flex-col items-center justify-center p-12">
-                <SpinnerIcon className="w-12 h-12 text-blue-600 mb-4" />
-                <p className="text-slate-500 font-medium">Checking application status...</p>
+  return (
+    <div className="min-h-screen font-sans flex flex-col items-center p-4">
+        <header className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center p-4 gap-4">
+            <div className="flex items-center gap-4">
+              <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="MARC AI Grader Logo" className="h-10 w-auto" />
+              <button 
+                onClick={handleOpenKeySelector} 
+                className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full transition shadow-sm border border-slate-200" 
+                title="Use your own API key"
+              >
+                <KeyIcon className="w-5 h-5" />
+              </button>
             </div>
-        );
-    }
-
-    if (hasApiKey === false) {
-      return (
-        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-3xl shadow-2xl max-w-md mx-auto text-center space-y-8 animate-fade-in border border-slate-100">
-          <div className="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center">
-            <KeyIcon className="w-10 h-10 text-blue-600" />
-          </div>
-          <div className="space-y-4">
-            <h2 className="text-3xl font-extrabold text-slate-900">Setup Required</h2>
-            <p className="text-slate-600 text-lg">
-              To use the Pro models for accurate sports card grading, you must select your own API key.
-            </p>
-          </div>
-          <div className="bg-slate-50 p-6 rounded-2xl text-left space-y-3 border border-slate-200">
-            <h4 className="font-bold text-slate-800 flex items-center gap-2">
-              <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-              Important Information:
-            </h4>
-            <ul className="text-sm text-slate-600 space-y-2 list-disc pl-5">
-              <li>Use a paid GCP project key for best results.</li>
-              <li>Billing must be enabled for Pro model access.</li>
-              <li>Visit <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-blue-600 font-bold underline">Billing Docs</a> for details.</li>
-            </ul>
-          </div>
-          <button 
-            onClick={handleOpenKeySelector}
-            className="w-full py-5 px-8 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white text-xl font-bold rounded-2xl shadow-xl transition-all transform hover:scale-[1.02] active:scale-[0.98]"
-          >
-            Select API Key
-          </button>
-        </div>
-      );
-    }
-
-    switch (view) {
-      case 'history':
-        return <CardHistory 
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                {user && (
+                  <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
+                    <HistoryIcon className="h-5 w-5" />
+                    <span className="hidden sm:inline">{view === 'history' ? 'Scanner' : `Collection (${cards.length})`}</span>
+                  </button>
+                )}
+                <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />
+              </div>
+            </div>
+        </header>
+        <main className="w-full flex-grow flex flex-col justify-center items-center">
+            {error && (
+              <div className="w-full max-w-md bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-4 flex justify-between items-center">
+                <span>{error}</span>
+                <button onClick={() => setError(null)} className="text-red-900 font-bold ml-4">×</button>
+              </div>
+            )}
+            
+            {view === 'history' ? (
+                <CardHistory 
                   cards={cards} 
                   onBack={() => setView('scanner')} 
                   onDelete={id => setCards(cur => { const upd = cur.filter(c => c.id !== id); saveCollectionToDrive(upd); return upd; })} 
@@ -355,9 +312,9 @@ const App: React.FC = () => {
                   onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
                   onLoadCollection={() => handleSyncWithDrive(false)} 
                   onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
-                />;
-      default:
-        return <CardScanner 
+                />
+            ) : (
+                <CardScanner 
                   onRatingRequest={handleRatingRequest} 
                   isGrading={isGrading} 
                   gradingStatus={gradingStatus} 
@@ -365,39 +322,9 @@ const App: React.FC = () => {
                   hasCards={cards.length > 0}
                   onSyncDrive={() => handleSyncWithDrive(false)}
                   isSyncing={syncStatus === 'loading'}
-               />;
-    }
-  };
-
-  return (
-    <div className="min-h-screen font-sans flex flex-col items-center p-4">
-        <header className="w-full max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center p-4 gap-4">
-            <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="MARC AI Grader Logo" className="h-10 w-auto" />
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                {hasApiKey && (
-                  <button onClick={handleOpenKeySelector} className="p-2 bg-white/70 hover:bg-white text-slate-600 rounded-full transition shadow-sm border border-slate-200" title="Manage API Key">
-                    <KeyIcon className="w-5 h-5" />
-                  </button>
-                )}
-                {user && hasApiKey && (
-                  <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="relative flex items-center gap-2 py-2 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition border border-slate-300">
-                    <HistoryIcon className="h-5 w-5" />
-                    <span className="hidden sm:inline">{view === 'history' ? 'Scanner' : `Collection (${cards.length})`}</span>
-                  </button>
-                )}
-                {hasApiKey && <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />}
-              </div>
-            </div>
-        </header>
-        <main className="w-full flex-grow flex flex-col justify-center items-center">
-            {error && (
-              <div className="w-full max-w-md bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg mb-4 flex justify-between items-center">
-                <span>{error}</span>
-                <button onClick={() => setError(null)} className="text-red-900 font-bold ml-4">×</button>
-              </div>
+                />
             )}
-            {renderView()}
+            
             {isSyncModalOpen && (
               <SyncSheetModal 
                 cardsToSync={cardsToResyncManually}
