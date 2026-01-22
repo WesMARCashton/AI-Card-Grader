@@ -22,6 +22,15 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 const BACKUP_KEY = 'nga_card_backup';
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
 
+// Immediate environment shim
+if (typeof window !== 'undefined') {
+  if (!(window as any).process) (window as any).process = { env: {} };
+  const savedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
+  if (savedKey && !process.env.API_KEY) {
+    (process.env as any).API_KEY = savedKey;
+  }
+}
+
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -52,22 +61,8 @@ const App: React.FC = () => {
   const processingCards = useRef(new Set<string>());
   const CONCURRENCY_LIMIT = 2;
 
-  // Initialize manual key from storage if present
-  useEffect(() => {
-    const savedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
-    if (savedKey) {
-        // Ensure process.env.API_KEY is populated for the geminiService
-        if (!(window as any).process) (window as any).process = { env: {} };
-        if (!process.env.API_KEY) {
-            (process.env as any).API_KEY = savedKey;
-        }
-    }
-  }, []);
-
   const handleOpenKeySelector = useCallback(async () => {
-    // Look for aistudio globally or on window
     const aistudio = (window as any).aistudio;
-    
     if (aistudio && typeof aistudio.openSelectKey === 'function') {
       try {
         await aistudio.openSelectKey();
@@ -76,8 +71,6 @@ const App: React.FC = () => {
         setShowApiKeyModal(true);
       }
     } else {
-      // If platform selector is missing (e.g. running outside of AI Studio), 
-      // show the manual modal provided in the component tree.
       setShowApiKeyModal(true);
     }
   }, []);
@@ -230,8 +223,8 @@ const App: React.FC = () => {
         return updated;
       });
     } catch (err: any) {
-      // If requested entity was not found, prompt for key selection
-      if (err.message?.includes("Requested entity was not found.")) {
+      console.error("Card processing error:", err);
+      if (err.message?.includes("API_KEY_MISSING") || err.message?.includes("Requested entity was not found.")) {
         handleOpenKeySelector();
       }
       setCards(current => {

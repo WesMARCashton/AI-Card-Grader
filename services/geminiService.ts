@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
@@ -31,7 +30,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     if (msg.includes('model is overloaded') || msg.includes('busy')) {
         return new Error("The AI model is currently busy. Retrying... If this persists, please try again in a few minutes.");
     }
-    if (msg.includes('api key') || msg.includes('401')) {
+    if (msg.includes('api key') || msg.includes('401') || msg === 'API_KEY_MISSING') {
         return new Error("API_KEY_MISSING");
     }
     return new Error(msg);
@@ -94,7 +93,11 @@ const NGA_GRADING_STANDARDS = `
 `;
 
 const getAIClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+      throw new Error("API_KEY_MISSING");
+  }
+  return new GoogleGenAI({ apiKey });
 };
 
 export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<any> => {
