@@ -2,13 +2,13 @@ import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThre
 import { CardData, EvaluationDetails, MarketValue } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
 
+const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
+
 const extractJson = (response: GenerateContentResponse): any => {
     const text = response.text;
     if (!text || text.trim().length === 0) {
         const reason = response.candidates?.[0]?.finishReason;
-        const safetyRatings = response.candidates?.[0]?.safetyRatings;
-        console.error("AI returned empty content. Reason:", reason, "Safety:", safetyRatings);
-        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). This usually happens if the content is flagged or the model is overloaded. Please try again with a clearer photo.`);
+        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). Content may be flagged or model is overloaded.`);
     }
 
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -19,7 +19,7 @@ const extractJson = (response: GenerateContentResponse): any => {
         return JSON.parse(jsonString.trim());
     } catch (e) {
         console.error("Failed to parse JSON from AI response:", text);
-        throw new Error("AI response was not in a valid format. Please try capturing the card again.");
+        throw new Error("AI response was not in a valid format. Please try again.");
     }
 }
 
@@ -28,7 +28,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     let msg = error.message || "An unexpected error occurred.";
 
     if (msg.includes('model is overloaded') || msg.includes('busy')) {
-        return new Error("The AI model is currently busy. Retrying... If this persists, please try again in a few minutes.");
+        return new Error("The AI model is currently busy. Please wait a moment and retry.");
     }
     if (msg.includes('api key') || msg.includes('401') || msg === 'API_KEY_MISSING') {
         return new Error("API_KEY_MISSING");
@@ -40,8 +40,8 @@ const withRetry = async <T>(
   apiCall: () => Promise<T>,
   context: string,
   onRetry?: (attempt: number, delay: number) => void,
-  retries = 15,
-  initialDelay = 4000
+  retries = 3,
+  initialDelay = 2000
 ): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
@@ -50,10 +50,10 @@ const withRetry = async <T>(
     } catch (error: any) {
       lastError = error;
       const msg = error.message?.toLowerCase() || '';
-      const isRetryable = msg.includes('overloaded') || msg.includes('busy') || msg.includes('unavailable') || msg.includes('503') || msg.includes('504') || msg.includes('empty response');
+      const isRetryable = msg.includes('overloaded') || msg.includes('busy') || msg.includes('503') || msg.includes('empty response');
 
       if (isRetryable && i < retries - 1) {
-        const delay = Math.min(initialDelay * Math.pow(1.6, i) + Math.random() * 2000, 45000);
+        const delay = initialDelay * Math.pow(2, i);
         onRetry?.(i + 1, delay);
         await new Promise(res => setTimeout(res, delay));
       } else {
@@ -74,27 +74,35 @@ const safetySettings = [
 const NGA_GRADING_STANDARDS = `
 --- START OF NGA GRADING STANDARDS ---
 **STRICT PROFESSIONAL GRADING ONLY**
+You are a cynical, master-level sports card grader. Your goal is to find reasons to LOWER the grade. 
 
 **Evaluation Categories (Subgrades)**
 - **Centering (25%):** Alignment of borders. 10=50/50. 9=60/40. 8=65/35. 7=70/30 or worse.
 - **Corners (25%):** Physical integrity. 10=Razor sharp. 9.5=Hint of white under high magnification. 9=Soft corner visible. 8=Rounded corners. 7=Corner dent/crease.
 - **Edges (20%):** Smoothness of the cut. 10=Zero nicks. 9=Minor silvering/chipping. 8=Visible rough cut or multiple nicks.
-- **Surface (20%):** Perfection of the printing and finish. 10=Flawless. 9.5=One micro-line or print dot. 9=Visible scratch, smudge, or print lines. 8=Staining, pitting, or multiple scratches.
+- **Surface (20%):** Perfection of printing and finish. 10=Flawless. 9.5=One micro-line. 9=Visible scratch, smudge, or print lines. 8=Staining, pitting, or multiple scratches.
 - **Print Quality (10%):** Clarity and Registration.
 
 **LOGIC RULES:**
 - If Average ends in .25, round DOWN to the nearest .0.
 - If Average ends in .75, round DOWN to the nearest .5.
-- **CREASE PENALTY:** Any crease (even a faint surface wrinkle) caps the overall grade at 5.0.
-- **LOW QUALITY PENALTY:** If any subgrade is < 6.0, the overall grade is automatically capped at 6.0.
+- **CREASE PENALTY:** Any crease = MAX OVERALL 5.0.
+- **LOW QUALITY PENALTY:** If any subgrade is < 6.0, overall grade is capped at 6.0.
 
-**INSTRUCTION:** Hunt for flaws. Do not default to 9.5. Most cards are 8s or 9s. Be extremely cynical. Awarding a 10 should be near-impossible. Look specifically for whitening on the back corners and edge chipping. If you see ANY imperfection, the subgrade MUST drop below 10.
+**INSTRUCTION:** Every card is unique. Describe SPECIFIC visible imperfections for THIS card only. Never use generic template responses. Awarding a 10 should be near-impossible. Look for whitening on the back corners and edge chipping.
 --- END OF NGA GRADING STANDARDS ---
 `;
 
 const getAIClient = () => {
+  // Hard sync from localStorage to process.env for this specific execution context
+  const storedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
+  if (storedKey) {
+    if (!(window as any).process) (window as any).process = { env: {} };
+    (process.env as any).API_KEY = storedKey;
+  }
+
   const apiKey = process.env.API_KEY;
-  if (!apiKey) {
+  if (!apiKey || apiKey === "undefined" || apiKey.length < 10) {
       throw new Error("API_KEY_MISSING");
   }
   return new GoogleGenAI({ apiKey });
@@ -140,7 +148,9 @@ export const identifyCard = async (frontImageBase64: string, backImageBase64: st
 
 export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `Perform a cynical, highly critical NGA analysis of this card. ${NGA_GRADING_STANDARDS} Examine the high-resolution images carefully for whitening, centering issues, and surface scratches. Output valid JSON only.`;
+    // Unique salt to prevent deterministic identical output
+    const sessionSalt = Math.random().toString(36).substring(7);
+    const prompt = `[Request ID: ${sessionSalt}] Perform a cynical, highly critical NGA analysis. ${NGA_GRADING_STANDARDS} Examine the high-resolution images for unique whitening, centering issues, and surface scratches specific to THIS card. Output valid JSON only.`;
 
     const subGradeSchema = {
       type: Type.OBJECT,
@@ -177,7 +187,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
             ]},
             config: { 
               safetySettings,
-              temperature: 0.0, 
+              temperature: 0.15, // Slight increase for descriptive variety
               responseMimeType: "application/json", 
               responseSchema 
             }
@@ -189,7 +199,7 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
 
 export const generateCardSummary = async (frontImageBase64: string, backImageBase64: string, cardData: Partial<CardData>): Promise<string> => {
     const ai = getAIClient();
-    const prompt = `Write a professional 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. Be critical and mention specific flaws identified. JSON: { "summary": string }`;
+    const prompt = `Write a professional 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. Mention SPECIFIC flaws seen in THESE images. JSON: { "summary": string }`;
     const responseSchema = { type: Type.OBJECT, properties: { summary: { type: Type.STRING } }, required: ['summary'] };
 
     const response = await withRetry<GenerateContentResponse>(
@@ -214,7 +224,7 @@ export const generateCardSummary = async (frontImageBase64: string, backImageBas
 
 export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
     const ai = getAIClient();
-    const prompt = `The user challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate using: ${NGA_GRADING_STANDARDS}. Search for more subtle flaws or strengths. JSON output only.`;
+    const prompt = `User challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate specifically looking for evidence supporting a ${direction} grade. Use ${NGA_GRADING_STANDARDS}. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -244,6 +254,7 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
             ]},
             config: { 
               safetySettings,
+              temperature: 0.2,
               responseMimeType: "application/json", 
               responseSchema 
             }
@@ -255,7 +266,7 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
 
 export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, backImageBase64: string, cardInfo: any, targetGrade: number, targetGradeName: string, onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string }> => {
     const ai = getAIClient();
-    const prompt = `Justify a manual grade of ${targetGrade} (${targetGradeName}) for this card using NGA rules. Find supporting flaws in the images for this grade. JSON output only.`;
+    const prompt = `Justify a manual grade of ${targetGrade} (${targetGradeName}) using NGA rules. Highlight SPECIFIC visual evidence in these images that support this exact grade. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -280,6 +291,7 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
             ]},
             config: { 
               safetySettings,
+              temperature: 0.3,
               responseMimeType: "application/json", 
               responseSchema 
             }
@@ -292,7 +304,7 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
-    const prompt = `Find recent eBay/Goldin/Heritage sold data for: "${query}". Output JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string }.`;
+    const prompt = `Find real-world recent sold listings for: "${query}". Return the current fair market value range. JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string, "notes": string }.`;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
@@ -318,6 +330,7 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
         minPrice: data.minPrice || 0,
         maxPrice: data.maxPrice || 0,
         currency: data.currency || 'USD',
+        notes: data.notes || '',
         sourceUrls
     };
 };
