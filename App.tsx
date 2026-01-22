@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -18,8 +17,10 @@ import { syncToSheet } from './services/sheetsService';
 import { HistoryIcon, KeyIcon, SpinnerIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
 import { SyncSheetModal } from './components/SyncSheetModal';
+import { ApiKeyModal } from './components/ApiKeyModal';
 
 const BACKUP_KEY = 'nga_card_backup';
+const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
 
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -45,19 +46,48 @@ const App: React.FC = () => {
   const [rewriteStatusMessage, setRewriteStatusMessage] = useState('');
   
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [cardsToResyncManually, setCardsToResyncManually] = useState<CardData[]>([]);
 
   const processingCards = useRef(new Set<string>());
   const CONCURRENCY_LIMIT = 2;
 
-  const handleOpenKeySelector = async () => {
-    if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+  // Initialize manual key from storage if present
+  useEffect(() => {
+    const savedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
+    if (savedKey) {
+        // Ensure process.env.API_KEY is populated for the geminiService
+        if (!(window as any).process) (window as any).process = { env: {} };
+        if (!process.env.API_KEY) {
+            (process.env as any).API_KEY = savedKey;
+        }
+    }
+  }, []);
+
+  const handleOpenKeySelector = useCallback(async () => {
+    // Look for aistudio globally or on window
+    const aistudio = (window as any).aistudio;
+    
+    if (aistudio && typeof aistudio.openSelectKey === 'function') {
       try {
-        await window.aistudio.openSelectKey();
+        await aistudio.openSelectKey();
       } catch (e) {
         console.error("Platform key selector failed:", e);
+        setShowApiKeyModal(true);
       }
+    } else {
+      // If platform selector is missing (e.g. running outside of AI Studio), 
+      // show the manual modal provided in the component tree.
+      setShowApiKeyModal(true);
     }
+  }, []);
+
+  const handleSaveManualKey = (key: string) => {
+    localStorage.setItem(MANUAL_API_KEY_STORAGE, key);
+    if (!(window as any).process) (window as any).process = { env: {} };
+    (process.env as any).API_KEY = key;
+    setShowApiKeyModal(false);
+    setError(null);
   };
 
   useEffect(() => {
@@ -212,7 +242,7 @@ const App: React.FC = () => {
     } finally {
       processingCards.current.delete(cardToProcess.id);
     }
-  }, [saveCollectionToDrive]);
+  }, [saveCollectionToDrive, handleOpenKeySelector]);
 
   useEffect(() => {
     const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
@@ -331,6 +361,13 @@ const App: React.FC = () => {
                 onClose={() => { setIsSyncModalOpen(false); setCardsToResyncManually([]); }}
                 getAccessToken={() => getAccessToken(false)}
                 onSyncSuccess={handleCardsSynced}
+              />
+            )}
+
+            {showApiKeyModal && (
+              <ApiKeyModal 
+                onSave={handleSaveManualKey}
+                onClose={() => setShowApiKeyModal(false)}
               />
             )}
         </main>
