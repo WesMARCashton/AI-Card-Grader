@@ -8,7 +8,7 @@ const extractJson = (response: GenerateContentResponse): any => {
     const text = response.text;
     if (!text || text.trim().length === 0) {
         const reason = response.candidates?.[0]?.finishReason;
-        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). Content may be flagged or model is overloaded.`);
+        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). Please try again.`);
     }
 
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -19,7 +19,7 @@ const extractJson = (response: GenerateContentResponse): any => {
         return JSON.parse(jsonString.trim());
     } catch (e) {
         console.error("Failed to parse JSON from AI response:", text);
-        throw new Error("AI response was not in a valid format. Please try again.");
+        throw new Error("AI response format error. Please try again.");
     }
 }
 
@@ -28,7 +28,7 @@ const handleGeminiError = (error: any, context: string): Error => {
     let msg = error.message || "An unexpected error occurred.";
 
     if (msg.includes('model is overloaded') || msg.includes('busy')) {
-        return new Error("The AI model is currently busy. Please wait a moment and retry.");
+        return new Error("The AI model is currently busy. Retrying...");
     }
     if (msg.includes('api key') || msg.includes('401') || msg === 'API_KEY_MISSING') {
         return new Error("API_KEY_MISSING");
@@ -40,8 +40,8 @@ const withRetry = async <T>(
   apiCall: () => Promise<T>,
   context: string,
   onRetry?: (attempt: number, delay: number) => void,
-  retries = 3,
-  initialDelay = 2000
+  retries = 2,
+  initialDelay = 1500
 ): Promise<T> => {
   let lastError: any;
   for (let i = 0; i < retries; i++) {
@@ -53,7 +53,7 @@ const withRetry = async <T>(
       const isRetryable = msg.includes('overloaded') || msg.includes('busy') || msg.includes('503') || msg.includes('empty response');
 
       if (isRetryable && i < retries - 1) {
-        const delay = initialDelay * Math.pow(2, i);
+        const delay = initialDelay * Math.pow(1.5, i);
         onRetry?.(i + 1, delay);
         await new Promise(res => setTimeout(res, delay));
       } else {
@@ -89,18 +89,16 @@ You are a cynical, master-level sports card grader. Your goal is to find reasons
 - **CREASE PENALTY:** Any crease = MAX OVERALL 5.0.
 - **LOW QUALITY PENALTY:** If any subgrade is < 6.0, overall grade is capped at 6.0.
 
-**INSTRUCTION:** Every card is unique. Describe SPECIFIC visible imperfections for THIS card only. Never use generic template responses. Awarding a 10 should be near-impossible. Look for whitening on the back corners and edge chipping.
+**INSTRUCTION:** Every card is unique. Describe SPECIFIC visible imperfections for THIS card only. Never use generic template responses. Awarding a 10 should be near-impossible.
 --- END OF NGA GRADING STANDARDS ---
 `;
 
 const getAIClient = () => {
-  // Hard sync from localStorage to process.env for this specific execution context
   const storedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
   if (storedKey) {
     if (!(window as any).process) (window as any).process = { env: {} };
     (process.env as any).API_KEY = storedKey;
   }
-
   const apiKey = process.env.API_KEY;
   if (!apiKey || apiKey === "undefined" || apiKey.length < 10) {
       throw new Error("API_KEY_MISSING");
@@ -108,58 +106,35 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-export const identifyCard = async (frontImageBase64: string, backImageBase64: string): Promise<any> => {
+/**
+ * High-speed combined analysis: Identification + Grading + Summary
+ * Uses Flash model for ultra-low latency.
+ */
+export const analyzeCardFull = async (frontImageBase64: string, backImageBase64: string): Promise<any> => {
     const ai = getAIClient();
-    const prompt = `Identify this sports card exactly. Strictly output valid JSON only: { "name": string, "team": string, "year": string, "set": string, "company": string, "cardNumber": string, "edition": string }`;
-    
-    const responseSchema = {
-      type: Type.OBJECT,
-      properties: {
-        name: { type: Type.STRING },
-        team: { type: Type.STRING },
-        set: { type: Type.STRING },
-        edition: { type: Type.STRING },
-        cardNumber: { type: Type.STRING },
-        company: { type: Type.STRING },
-        year: { type: Type.STRING },
-      },
-      required: ['name', 'team', 'year', 'set', 'company', 'cardNumber', 'edition']
-    };
-
-    const response = await withRetry<GenerateContentResponse>(
-        () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
-            contents: { parts: [
-                { text: prompt },
-                { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
-                { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
-            ]},
-            config: { 
-              safetySettings,
-              temperature: 0.1, 
-              responseMimeType: "application/json", 
-              responseSchema 
-            }
-        }),
-        'identifying card'
-    );
-    return extractJson(response);
-};
-
-export const gradeCardPreliminary = async (frontImageBase64: string, backImageBase64: string): Promise<{ details: EvaluationDetails, overallGrade: number, gradeName: string }> => {
-    const ai = getAIClient();
-    // Unique salt to prevent deterministic identical output
     const sessionSalt = Math.random().toString(36).substring(7);
-    const prompt = `[Request ID: ${sessionSalt}] Perform a cynical, highly critical NGA analysis. ${NGA_GRADING_STANDARDS} Examine the high-resolution images for unique whitening, centering issues, and surface scratches specific to THIS card. Output valid JSON only.`;
-
+    const prompt = `[ID: ${sessionSalt}] Identify this sports card and perform a strict NGA analysis. ${NGA_GRADING_STANDARDS}
+    Identify: name, team, year, set, company, cardNumber, edition.
+    Grade: subgrades for centering, corners, edges, surface, printQuality, plus overallGrade and gradeName.
+    Summary: 2-3 sentence justification of the grade.
+    Strictly output valid JSON only.`;
+    
     const subGradeSchema = {
       type: Type.OBJECT,
       properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } },
       required: ['grade', 'notes'],
     };
+
     const responseSchema = {
       type: Type.OBJECT,
       properties: {
+        name: { type: Type.STRING },
+        team: { type: Type.STRING },
+        year: { type: Type.STRING },
+        set: { type: Type.STRING },
+        company: { type: Type.STRING },
+        cardNumber: { type: Type.STRING },
+        edition: { type: Type.STRING },
         details: {
           type: Type.OBJECT,
           properties: {
@@ -173,34 +148,10 @@ export const gradeCardPreliminary = async (frontImageBase64: string, backImageBa
         },
         overallGrade: { type: Type.NUMBER },
         gradeName: { type: Type.STRING },
+        summary: { type: Type.STRING }
       },
-      required: ['details', 'overallGrade', 'gradeName'],
+      required: ['name', 'team', 'year', 'set', 'company', 'cardNumber', 'edition', 'details', 'overallGrade', 'gradeName', 'summary']
     };
-
-    const response = await withRetry<GenerateContentResponse>(
-        () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview', 
-            contents: { parts: [
-                { text: prompt },
-                { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
-                { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
-            ]},
-            config: { 
-              safetySettings,
-              temperature: 0.15, // Slight increase for descriptive variety
-              responseMimeType: "application/json", 
-              responseSchema 
-            }
-        }),
-        'grading card'
-    );
-    return extractJson(response);
-};
-
-export const generateCardSummary = async (frontImageBase64: string, backImageBase64: string, cardData: Partial<CardData>): Promise<string> => {
-    const ai = getAIClient();
-    const prompt = `Write a professional 2-3 sentence report on why this card is a ${cardData.overallGrade}. Use subgrades: ${JSON.stringify(cardData.details)}. Mention SPECIFIC flaws seen in THESE images. JSON: { "summary": string }`;
-    const responseSchema = { type: Type.OBJECT, properties: { summary: { type: Type.STRING } }, required: ['summary'] };
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
@@ -212,17 +163,22 @@ export const generateCardSummary = async (frontImageBase64: string, backImageBas
             ]},
             config: { 
               safetySettings,
-              temperature: 0.7, 
+              temperature: 0.1, 
               responseMimeType: "application/json", 
               responseSchema 
             }
         }),
-        'summary'
+        'full analysis'
     );
-    return extractJson(response).summary;
+    return extractJson(response);
 };
 
-export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string, overallGrade: number, gradeName: string }> => {
+// Keep old exports but proxy to the new flow or specialized versions for retries/manuals
+export const identifyCard = async (f: string, b: string) => (await analyzeCardFull(f, b));
+export const gradeCardPreliminary = async (f: string, b: string) => (await analyzeCardFull(f, b));
+export const generateCardSummary = async (f: string, b: string, data: any) => (await analyzeCardFull(f, b)).summary;
+
+export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<any> => {
     const ai = getAIClient();
     const prompt = `User challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate specifically looking for evidence supporting a ${direction} grade. Use ${NGA_GRADING_STANDARDS}. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
@@ -241,20 +197,17 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
       required: ['overallGrade', 'gradeName', 'details', 'summary'],
     };
 
-    const frontImageBase64 = dataUrlToBase64(card.frontImage);
-    const backImageBase64 = dataUrlToBase64(card.backImage);
-    
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
-                { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
-                { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
+                { inlineData: { mimeType: 'image/jpeg', data: dataUrlToBase64(card.frontImage) } },
+                { inlineData: { mimeType: 'image/jpeg', data: dataUrlToBase64(card.backImage) } },
             ]},
             config: { 
               safetySettings,
-              temperature: 0.2,
+              temperature: 0.15,
               responseMimeType: "application/json", 
               responseSchema 
             }
@@ -264,9 +217,9 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
     return extractJson(response);
 };
 
-export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, backImageBase64: string, cardInfo: any, targetGrade: number, targetGradeName: string, onStatusUpdate: (status: string) => void): Promise<{ details: EvaluationDetails, summary: string }> => {
+export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, backImageBase64: string, cardInfo: any, targetGrade: number, targetGradeName: string, onStatusUpdate: (status: string) => void): Promise<any> => {
     const ai = getAIClient();
-    const prompt = `Justify a manual grade of ${targetGrade} (${targetGradeName}) using NGA rules. Highlight SPECIFIC visual evidence in these images that support this exact grade. JSON output only.`;
+    const prompt = `Justify a manual grade of ${targetGrade} (${targetGradeName}) using NGA rules. Highlight SPECIFIC visual evidence. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -283,7 +236,7 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -291,7 +244,7 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
             ]},
             config: { 
               safetySettings,
-              temperature: 0.3,
+              temperature: 0.1,
               responseMimeType: "application/json", 
               responseSchema 
             }
@@ -304,7 +257,7 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
-    const prompt = `Find real-world recent sold listings for: "${query}". Return the current fair market value range. JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string, "notes": string }.`;
+    const prompt = `Find recent sold listings for: "${query}". Return market value range. JSON: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": string, "notes": string }.`;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({

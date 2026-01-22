@@ -7,9 +7,7 @@ import { useGoogleAuth } from './hooks/useGoogleAuth';
 import { 
   challengeGrade, 
   regenerateCardAnalysisForGrade,
-  identifyCard,
-  gradeCardPreliminary,
-  generateCardSummary,
+  analyzeCardFull,
   getCardMarketValue
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
@@ -22,7 +20,6 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 const BACKUP_KEY = 'nga_card_backup';
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
 
-// Global shim that runs once on import
 if (typeof window !== 'undefined') {
   if (!(window as any).process) (window as any).process = { env: {} };
   const savedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
@@ -45,8 +42,6 @@ const App: React.FC = () => {
   const [cards, setCards] = useState<CardData[]>([]);
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isGrading, setIsGrading] = useState(false);
-  const [gradingStatus, setGradingStatus] = useState('');
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [isRewriting, setIsRewriting] = useState(false);
   const [rewriteProgress, setRewriteProgress] = useState(0);
@@ -56,7 +51,6 @@ const App: React.FC = () => {
   
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-  const [cardsToResyncManually, setCardsToResyncManually] = useState<CardData[]>([]);
   const [hasApiKey, setHasApiKey] = useState(!!localStorage.getItem(MANUAL_API_KEY_STORAGE) || !!process.env.API_KEY);
 
   const processingCards = useRef(new Set<string>());
@@ -83,8 +77,6 @@ const App: React.FC = () => {
     setHasApiKey(true);
     setShowApiKeyModal(false);
     setError(null);
-    
-    // Auto-retry any failed cards once a key is added
     setCards(current => current.map(c => c.status === 'grading_failed' ? { ...c, status: 'grading', errorMessage: undefined } : c));
   };
 
@@ -159,12 +151,14 @@ const App: React.FC = () => {
 
       switch (cardToProcess.status) {
         case 'grading':
-          const [idInfo, gradeInfo] = await Promise.all([identifyCard(f64, b64), gradeCardPreliminary(f64, b64)]);
-          finalCardData = { ...idInfo, ...gradeInfo };
+          // Consolidated Analyze step (Identification + Grade + Summary in one call)
+          const results = await analyzeCardFull(f64, b64);
+          finalCardData = results;
+          finalStatus = 'needs_review'; // Always go to review after full analysis
           break;
         case 'generating_summary':
-          finalCardData = { summary: await generateCardSummary(f64, b64, cardToProcess) };
-          finalStatus = 'fetching_value' as const;
+          // This state is now mostly bypassed for new cards, but kept for legacy/compatibility
+          finalStatus = 'fetching_value';
           break;
         case 'challenging':
           finalCardData = { ...await challengeGrade(cardToProcess, cardToProcess.challengeDirection!, () => {}), challengeDirection: undefined };
@@ -255,7 +249,7 @@ const App: React.FC = () => {
                   onRewriteAllAnalyses={async () => {}}
                   resetRewriteState={() => {}}
                   isRewriting={isRewriting} rewriteProgress={rewriteProgress} rewrittenCount={rewrittenCount} rewriteFailCount={rewriteFailCount} rewriteStatusMessage={rewriteStatusMessage}
-                  onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'generating_summary' } : c))}
+                  onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
                   onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
                   onLoadCollection={() => handleSyncWithDrive(false)} 
                   onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
@@ -263,8 +257,8 @@ const App: React.FC = () => {
             ) : (
                 <CardScanner 
                   onRatingRequest={handleRatingRequest} 
-                  isGrading={isGrading} 
-                  gradingStatus={gradingStatus} 
+                  isGrading={false} // Global status managed by cards list
+                  gradingStatus={''} 
                   isLoggedIn={!!user}
                   hasCards={cards.length > 0}
                   onSyncDrive={() => handleSyncWithDrive(false)}
