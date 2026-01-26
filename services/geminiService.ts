@@ -9,9 +9,7 @@ const extractJson = (response: GenerateContentResponse): any => {
     const text = response.text;
     if (!text || text.trim().length === 0) {
         const reason = response.candidates?.[0]?.finishReason;
-        // If the model stopped without content, it usually means it hit a complexity limit or safety trigger
-        // We throw a more helpful error for the user.
-        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). This usually happens with complex images. Please try again or use a clearer photo.`);
+        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). This usually happens with blurry photos or connection issues. Please try again.`);
     }
 
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -74,27 +72,20 @@ const safetySettings = [
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
 ];
 
-const NGA_GRADING_STANDARDS = `
---- START OF NGA GRADING STANDARDS ---
-**STRICT PROFESSIONAL GRADING ONLY**
-You are a cynical, master-level sports card grader. Your goal is to find reasons to LOWER the grade. 
-
-**Evaluation Categories (Subgrades)**
-- **Centering (25%):** Alignment of borders. 10=50/50. 9=60/40. 8=65/35. 7=70/30 or worse.
-- **Corners (25%):** Physical integrity. 10=Razor sharp. 9.5=Hint of white under high magnification. 9=Soft corner visible. 8=Rounded corners. 7=Corner dent/crease.
-- **Edges (20%):** Smoothness of the cut. 10=Zero nicks. 9=Minor silvering/chipping. 8=Visible rough cut or multiple nicks.
-- **Surface (20%):** Perfection of printing and finish. 10=Flawless. 9.5=One micro-line. 9=Visible scratch, smudge, or print lines. 8=Staining, pitting, or multiple scratches.
-- **Print Quality (10%):** Clarity and Registration.
-
-**LOGIC RULES:**
-- If Average ends in .25, round DOWN to the nearest .0.
-- If Average ends in .75, round DOWN to the nearest .5.
-- **CREASE PENALTY:** Any crease = MAX OVERALL 5.0.
-- **LOW QUALITY PENALTY:** If any subgrade is < 6.0, overall grade is capped at 6.0.
-
-**INSTRUCTION:** Every card is unique. Describe SPECIFIC visible imperfections for THIS card only. Never use generic template responses. Awarding a 10 should be near-impossible.
---- END OF NGA GRADING STANDARDS ---
-`;
+const NGA_SYSTEM_INSTRUCTION = `You are a professional, strict sports card grader operating under NGA standards. 
+Your goal is to identify the card and provide a detailed condition report. 
+BE CYNICAL: Find flaws. Awarding a 10 is almost impossible. 
+RULES:
+1. Centering (25%): 10=50/50, 9=60/40, 8=65/35, 7=70/30.
+2. Corners (25%): 10=Sharp, 9.5=Micro-white, 9=Soft, 8=Rounded, 7=Dent/Crease.
+3. Edges (20%): 10=Zero nicks, 9=Minor silvering, 8=Visible rough cut.
+4. Surface (20%): 10=Flawless, 9=Scratch/Smudge, 8=Pitting/Stain.
+5. Print Quality (10%): Clarity.
+LOGIC:
+- Crease = MAX 5.0 Overall.
+- Subgrade < 6.0 = MAX 6.0 Overall.
+- Average .25 or .75? Round DOWN to nearest .0 or .5.
+ALWAYS output valid JSON.`;
 
 const getAIClient = () => {
   const storedKey = localStorage.getItem(MANUAL_API_KEY_STORAGE);
@@ -111,12 +102,7 @@ const getAIClient = () => {
 
 export const analyzeCardFull = async (frontImageBase64: string, backImageBase64: string): Promise<any> => {
     const ai = getAIClient();
-    const sessionSalt = Math.random().toString(36).substring(7);
-    const prompt = `[ID: ${sessionSalt}] Identify this sports card and perform a strict NGA analysis. ${NGA_GRADING_STANDARDS}
-    Identify: name, team, year, set, company, cardNumber, edition.
-    Grade: subgrades for centering, corners, edges, surface, printQuality, plus overallGrade and gradeName.
-    Summary: 2-3 sentence justification of the grade.
-    Strictly output valid JSON only. If images are unclear, do your best based on visible evidence rather than stopping.`;
+    const prompt = `Identify this sports card and perform a strict NGA analysis. Output JSON with fields: name, team, year, set, company, cardNumber, edition, details (centering, corners, edges, surface, printQuality: {grade, notes}), overallGrade, gradeName, summary.`;
     
     const subGradeSchema = {
       type: Type.OBJECT,
@@ -154,20 +140,20 @@ export const analyzeCardFull = async (frontImageBase64: string, backImageBase64:
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Using Pro model for analysis tasks to avoid "STOP" reasons and empty responses
-            model: 'gemini-3-pro-preview',
+            // Using Flash for speed as requested by user
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
             config: { 
+              systemInstruction: NGA_SYSTEM_INSTRUCTION,
               safetySettings,
               temperature: 0.1, 
               responseMimeType: "application/json", 
               responseSchema,
-              // Use thinking budget for Pro model to handle complex subgrade calculations
-              thinkingConfig: { thinkingBudget: 2000 }
+              thinkingConfig: { thinkingBudget: 0 } // Disabled for speed
             }
         }),
         'full analysis'
@@ -177,7 +163,7 @@ export const analyzeCardFull = async (frontImageBase64: string, backImageBase64:
 
 export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<any> => {
     const ai = getAIClient();
-    const prompt = `User challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate specifically looking for evidence supporting a ${direction} grade. Use ${NGA_GRADING_STANDARDS}. JSON output only.`;
+    const prompt = `User challenges the grade of ${card.overallGrade} as too ${direction}. Re-evaluate specifically looking for evidence supporting a ${direction} grade. JSON output only.`;
     const subGradeSchema = { type: Type.OBJECT, properties: { grade: { type: Type.NUMBER }, notes: { type: Type.STRING } }, required: ['grade', 'notes'] };
     const responseSchema = {
       type: Type.OBJECT,
@@ -196,18 +182,19 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: dataUrlToBase64(card.frontImage) } },
                 { inlineData: { mimeType: 'image/jpeg', data: dataUrlToBase64(card.backImage) } },
             ]},
             config: { 
+              systemInstruction: NGA_SYSTEM_INSTRUCTION,
               safetySettings,
               temperature: 0.15,
               responseMimeType: "application/json", 
               responseSchema,
-              thinkingConfig: { thinkingBudget: 2000 }
+              thinkingConfig: { thinkingBudget: 0 }
             }
         }), 
         'challenge'
@@ -234,18 +221,19 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3-flash-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
                 { inlineData: { mimeType: 'image/jpeg', data: backImageBase64 } },
             ]},
             config: { 
+              systemInstruction: NGA_SYSTEM_INSTRUCTION,
               safetySettings,
               temperature: 0.1,
               responseMimeType: "application/json", 
               responseSchema,
-              thinkingConfig: { thinkingBudget: 1000 }
+              thinkingConfig: { thinkingBudget: 0 }
             }
         }), 
         'regenerate'
@@ -257,11 +245,10 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
     
-    const prompt = `SEARCH: market value of "${query}". JSON only: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": "USD", "notes": "source summary" }.`;
+    const prompt = `Search for market value of "${query}". Return JSON: averagePrice, minPrice, maxPrice, currency, notes.`;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            // Market value remains Flash for speed
             model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
             config: { 
