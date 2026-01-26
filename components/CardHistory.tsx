@@ -72,13 +72,15 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
 
-  // CRITICAL FIX: Include 'fetching_value' in collection list so they don't disappear
   const collectionCards = props.cards.filter(c => ['reviewed', 'fetching_value'].includes(c.status));
   const unsyncedCards = collectionCards.filter(c => !c.isSynced);
   const needsReviewCards = props.cards.filter(c => ['needs_review', 'grading_failed', 'grading', 'challenging'].includes(c.status));
 
   const handleResyncAll = () => {
-    if (collectionCards.length === 0) return;
+    if (collectionCards.length === 0) {
+        alert("No graded cards in collection to sync.");
+        return;
+    }
     setCustomSyncList(collectionCards);
     setIsSyncModalOpen(true);
   };
@@ -104,11 +106,19 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                 </div>
             </div>
             <div className="flex gap-2">
-                <button onClick={handleResyncAll} className="flex items-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50">
+                <button 
+                  onClick={handleResyncAll} 
+                  disabled={collectionCards.length === 0}
+                  className="flex items-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
+                >
                     <ResyncIcon className="w-5 h-5" />
                     <span className="hidden sm:inline">Resync All</span>
                 </button>
-                <button onClick={() => setIsSyncModalOpen(true)} disabled={unsyncedCards.length === 0} className="flex items-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50">
+                <button 
+                  onClick={() => { setCustomSyncList(null); setIsSyncModalOpen(true); }} 
+                  disabled={unsyncedCards.length === 0} 
+                  className="flex items-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50"
+                >
                     <CheckIcon className="w-5 h-5" />
                     <span>Sync</span>
                 </button>

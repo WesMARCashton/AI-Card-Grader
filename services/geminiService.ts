@@ -9,7 +9,9 @@ const extractJson = (response: GenerateContentResponse): any => {
     const text = response.text;
     if (!text || text.trim().length === 0) {
         const reason = response.candidates?.[0]?.finishReason;
-        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). Please try again.`);
+        // If the model stopped without content, it usually means it hit a complexity limit or safety trigger
+        // We throw a more helpful error for the user.
+        throw new Error(`AI returned an empty response (Reason: ${reason || 'Unknown'}). This usually happens with complex images. Please try again or use a clearer photo.`);
     }
 
     const jsonRegex = /```json\s*([\s\S]*?)\s*```/;
@@ -114,7 +116,7 @@ export const analyzeCardFull = async (frontImageBase64: string, backImageBase64:
     Identify: name, team, year, set, company, cardNumber, edition.
     Grade: subgrades for centering, corners, edges, surface, printQuality, plus overallGrade and gradeName.
     Summary: 2-3 sentence justification of the grade.
-    Strictly output valid JSON only.`;
+    Strictly output valid JSON only. If images are unclear, do your best based on visible evidence rather than stopping.`;
     
     const subGradeSchema = {
       type: Type.OBJECT,
@@ -152,7 +154,8 @@ export const analyzeCardFull = async (frontImageBase64: string, backImageBase64:
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            // Using Pro model for analysis tasks to avoid "STOP" reasons and empty responses
+            model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -162,17 +165,15 @@ export const analyzeCardFull = async (frontImageBase64: string, backImageBase64:
               safetySettings,
               temperature: 0.1, 
               responseMimeType: "application/json", 
-              responseSchema 
+              responseSchema,
+              // Use thinking budget for Pro model to handle complex subgrade calculations
+              thinkingConfig: { thinkingBudget: 2000 }
             }
         }),
         'full analysis'
     );
     return extractJson(response);
 };
-
-export const identifyCard = async (f: string, b: string) => (await analyzeCardFull(f, b));
-export const gradeCardPreliminary = async (f: string, b: string) => (await analyzeCardFull(f, b));
-export const generateCardSummary = async (f: string, b: string, data: any) => (await analyzeCardFull(f, b)).summary;
 
 export const challengeGrade = async (card: CardData, direction: 'higher' | 'lower', onStatusUpdate: (status: string) => void): Promise<any> => {
     const ai = getAIClient();
@@ -195,7 +196,7 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: dataUrlToBase64(card.frontImage) } },
@@ -205,7 +206,8 @@ export const challengeGrade = async (card: CardData, direction: 'higher' | 'lowe
               safetySettings,
               temperature: 0.15,
               responseMimeType: "application/json", 
-              responseSchema 
+              responseSchema,
+              thinkingConfig: { thinkingBudget: 2000 }
             }
         }), 
         'challenge'
@@ -232,7 +234,7 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
-            model: 'gemini-3-flash-preview',
+            model: 'gemini-3-pro-preview',
             contents: { parts: [
                 { text: prompt },
                 { inlineData: { mimeType: 'image/jpeg', data: frontImageBase64 } },
@@ -242,7 +244,8 @@ export const regenerateCardAnalysisForGrade = async (frontImageBase64: string, b
               safetySettings,
               temperature: 0.1,
               responseMimeType: "application/json", 
-              responseSchema 
+              responseSchema,
+              thinkingConfig: { thinkingBudget: 1000 }
             }
         }), 
         'regenerate'
@@ -254,11 +257,11 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
     const ai = getAIClient();
     const query = `${card.year} ${card.company} ${card.set} ${card.name} #${card.cardNumber} Grade ${card.overallGrade}`;
     
-    // ULTRA-FAST PROMPT: Minimum instructions for fastest inference.
     const prompt = `SEARCH: market value of "${query}". JSON only: { "averagePrice": number, "minPrice": number, "maxPrice": number, "currency": "USD", "notes": "source summary" }.`;
 
     const response = await withRetry<GenerateContentResponse>(
         () => ai.models.generateContent({
+            // Market value remains Flash for speed
             model: 'gemini-3-flash-preview',
             contents: { parts: [{ text: prompt }] },
             config: { 
