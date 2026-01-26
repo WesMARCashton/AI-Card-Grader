@@ -148,6 +148,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
   const [isRewriteModalOpen, setIsRewriteModalOpen] = useState(false);
   const [isSheetSettingsOpen, setIsSheetSettingsOpen] = useState(false);
   const [hasSheetConfig, setHasSheetConfig] = useState(!!localStorage.getItem('google_sheet_url'));
+  const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
 
   useEffect(() => {
     if (selectedCard) {
@@ -212,6 +213,12 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
     link.click();
     document.body.removeChild(link);
   };
+
+  const handleResyncAll = () => {
+    if (collectionCards.length === 0) return;
+    setCustomSyncList(collectionCards);
+    setIsSheetModalOpen(true);
+  };
   
   return (
     <>
@@ -243,7 +250,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
           </div>
         </div>
 
-        {/* Global Toolbar for Sheet Sync and Settings - Alway visible if cards exist */}
+        {/* Global Toolbar for Sheet Sync and Settings - Always visible if cards exist */}
         <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
             <div className="flex items-center gap-3">
                 <div className="bg-green-100 p-2 rounded-lg">
@@ -256,7 +263,7 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
                     </p>
                 </div>
             </div>
-            <div className="flex gap-2 w-full sm:w-auto">
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                 <button
                     onClick={() => setIsSheetSettingsOpen(true)}
                     className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition"
@@ -265,12 +272,21 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
                     <span>Settings</span>
                 </button>
                 <button
+                    onClick={handleResyncAll}
+                    disabled={collectionCards.length === 0}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
+                    title="Sync entire collection (all cards)"
+                >
+                    <ResyncIcon className="w-5 h-5" />
+                    <span>Resync All</span>
+                </button>
+                <button
                     onClick={() => setIsSheetModalOpen(true)}
                     disabled={cardsToSync.length === 0}
                     className="flex-1 sm:flex-none flex items-center justify-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50"
                 >
                     <CheckIcon className="w-5 h-5" />
-                    <span>Sync ({cardsToSync.length})</span>
+                    <span>Sync Unsynced ({cardsToSync.length})</span>
                 </button>
             </div>
         </div>
@@ -356,8 +372,8 @@ export const CardHistory: React.FC<CardHistoryProps> = ({
       )}
       {isSheetModalOpen && (
         <SyncSheetModal 
-          cardsToSync={cardsToSync}
-          onClose={() => setIsSheetModalOpen(false)}
+          cardsToSync={customSyncList || cardsToSync}
+          onClose={() => { setIsSheetModalOpen(false); setCustomSyncList(null); }}
           getAccessToken={getAccessToken}
           onSyncSuccess={onCardsSynced}
         />
