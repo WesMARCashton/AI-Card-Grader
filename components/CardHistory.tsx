@@ -26,6 +26,7 @@ interface CardHistoryProps {
   onAcceptGrade: (cardId: string) => void;
   onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
   onLoadCollection?: () => void;
+  onSyncFromSheet?: () => Promise<void>;
   onGetMarketValue: (card: CardData) => void; 
   userName: string;
 }
@@ -71,6 +72,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   const [isSheetSettingsOpen, setIsSheetSettingsOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
+  const [isPullingFromSheet, setIsPullingFromSheet] = useState(false);
 
   const collectionCards = props.cards.filter(c => ['reviewed', 'fetching_value'].includes(c.status));
   const unsyncedCards = collectionCards.filter(c => !c.isSynced);
@@ -83,6 +85,20 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
     }
     setCustomSyncList(collectionCards);
     setIsSyncModalOpen(true);
+  };
+
+  const handleSyncFromSheet = async () => {
+    if (!props.onSyncFromSheet) return;
+    if (!window.confirm("This will pull all records from your Google Sheet. It may take a moment. Continue?")) return;
+    
+    setIsPullingFromSheet(true);
+    try {
+        await props.onSyncFromSheet();
+    } catch (err) {
+        alert("Failed to sync from sheet. Please check your URL in settings.");
+    } finally {
+        setIsPullingFromSheet(false);
+    }
   };
 
   return (
@@ -105,14 +121,22 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                     <p className="text-xs text-slate-500">{unsyncedCards.length} pending</p>
                 </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 justify-center">
+                <button 
+                  onClick={handleSyncFromSheet}
+                  disabled={isPullingFromSheet}
+                  className="flex items-center gap-2 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
+                >
+                    {isPullingFromSheet ? <SpinnerIcon className="w-5 h-5" /> : <ResyncIcon className="w-5 h-5" />}
+                    <span className="hidden sm:inline">{isPullingFromSheet ? 'Pulling...' : 'Sync From Sheet'}</span>
+                </button>
                 <button 
                   onClick={handleResyncAll} 
                   disabled={collectionCards.length === 0}
                   className="flex items-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
                 >
                     <ResyncIcon className="w-5 h-5" />
-                    <span className="hidden sm:inline">Resync All</span>
+                    <span className="hidden sm:inline">Resync All To Sheet</span>
                 </button>
                 <button 
                   onClick={() => { setCustomSyncList(null); setIsSyncModalOpen(true); }} 
@@ -120,7 +144,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                   className="flex items-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50"
                 >
                     <CheckIcon className="w-5 h-5" />
-                    <span>Sync</span>
+                    <span>Sync New</span>
                 </button>
             </div>
         </div>
@@ -136,13 +160,21 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
             )}
 
             <div className="space-y-3">
-                <h2 className="text-lg font-bold text-slate-800">Collection ({collectionCards.length})</h2>
+                <div className="flex justify-between items-center">
+                    <h2 className="text-lg font-bold text-slate-800">Collection ({collectionCards.length})</h2>
+                    {props.onLoadCollection && (
+                        <button onClick={props.onLoadCollection} className="text-xs font-bold text-blue-600 hover:underline">
+                            Refresh from Drive
+                        </button>
+                    )}
+                </div>
                 {props.cards.length === 0 ? (
                     <div className="py-20 text-center text-slate-400 border-2 border-dashed rounded-xl bg-slate-50">
-                        <p className="mb-4">No cards found.</p>
-                        {props.onLoadCollection && (
-                             <button onClick={props.onLoadCollection} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Drive</button>
-                        )}
+                        <p className="mb-4">No cards found in local cache.</p>
+                        <div className="flex gap-4 justify-center">
+                            <button onClick={props.onLoadCollection} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Drive</button>
+                            <button onClick={handleSyncFromSheet} className="bg-green-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Sheet</button>
+                        </div>
                     </div>
                 ) : (
                     collectionCards.map(c => (

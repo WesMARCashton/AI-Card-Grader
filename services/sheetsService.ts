@@ -47,7 +47,6 @@ export const syncToSheet = async (accessToken: string, sheetUrl: string, cardsTo
     const rowsToAppend: any[][] = needsHeaders ? [SHEET_HEADERS] : [];
     const newRows = cardsToSync.map(card => {
         const d = card.details;
-        // B, C, D, E, F, G, H correspond to indices 1, 2, 3, 4, 5, 6, 7
         return [
             card.year || '', 
             (card.company || '').toUpperCase(),      // Column B
@@ -84,6 +83,7 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
     const spreadsheetId = getSheetIdFromUrl(sheetUrl);
     if (!spreadsheetId) throw new Error("Invalid Google Sheet URL.");
 
+    // Fetching A:V which contains 22 columns of data
     const response = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/A:V`, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
     });
@@ -92,35 +92,38 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
     const data = await response.json();
     if (!data.values || data.values.length <= 1) return [];
 
-    return data.values.slice(1).map((row: any[], index: number) => {
-        const details: EvaluationDetails = {
-            centering: { grade: parseFloat(row[11]), notes: row[12] },
-            corners: { grade: parseFloat(row[13]), notes: row[14] },
-            edges: { grade: parseFloat(row[15]), notes: row[16] },
-            surface: { grade: parseFloat(row[17]), notes: row[18] },
-            printQuality: { grade: parseFloat(row[19]), notes: row[20] },
-        };
+    // Filter out rows that are entirely empty or clearly not card data (header rows that aren't the first)
+    return data.values.slice(1)
+        .filter((row: any[]) => row.length > 3 && (row[3] || row[0])) // Must have Name or Year
+        .map((row: any[], index: number) => {
+            const details: EvaluationDetails = {
+                centering: { grade: parseFloat(row[11]), notes: row[12] || '' },
+                corners: { grade: parseFloat(row[13]), notes: row[14] || '' },
+                edges: { grade: parseFloat(row[15]), notes: row[16] || '' },
+                surface: { grade: parseFloat(row[17]), notes: row[18] || '' },
+                printQuality: { grade: parseFloat(row[19]), notes: row[20] || '' },
+            };
 
-        return {
-            id: `sheet-${index}`,
-            status: 'reviewed',
-            year: row[0],
-            company: row[1],
-            team: row[2],
-            name: row[3],
-            edition: row[4],
-            set: row[5],
-            cardNumber: row[6],
-            gradeName: row[7],
-            overallGrade: parseFloat(row[8]),
-            scannedBy: row[9] || 'Sheet Import',
-            timestamp: row[10] ? new Date(row[10]).getTime() : Date.now(),
-            details,
-            summary: row[21],
-            gradingSystem: 'NGA',
-            isSynced: true,
-            frontImage: '', 
-            backImage: ''
-        };
-    });
+            return {
+                id: `sheet-${index}-${Date.now()}`,
+                status: 'reviewed',
+                year: row[0] || '',
+                company: row[1] || '',
+                team: row[2] || '',
+                name: row[3] || '',
+                edition: row[4] || '',
+                set: row[5] || '',
+                cardNumber: row[6] || '',
+                gradeName: row[7] || '',
+                overallGrade: parseFloat(row[8]) || 0,
+                scannedBy: row[9] || 'Sheet Import',
+                timestamp: row[10] ? (isNaN(new Date(row[10]).getTime()) ? Date.now() : new Date(row[10]).getTime()) : Date.now(),
+                details,
+                summary: row[21] || '',
+                gradingSystem: 'NGA',
+                isSynced: true,
+                frontImage: '', 
+                backImage: ''
+            } as CardData;
+        });
 };

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -11,11 +12,13 @@ import {
   getCardMarketValue
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
+import { fetchCardsFromSheet } from './services/sheetsService';
 import { HistoryIcon, SpinnerIcon } from './components/icons';
-import { dataUrlToBase64 } from './utils/fileUtils';
+import { dataUrlToBase64 } from './fileUtils';
 import { ApiKeyModal } from './components/ApiKeyModal';
 
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
+const SHEET_URL_STORAGE = 'google_sheet_url';
 
 if (typeof window !== 'undefined') {
   if (!(window as any).process) (window as any).process = { env: {} };
@@ -31,13 +34,6 @@ const generateId = () => {
 const App: React.FC = () => {
   // ---- iframe auto-resize: report app height to parent (WordPress) ----
   useEffect(() => {
-    /**
-     * IMPORTANT:
-     * Set this to your WordPress site ORIGIN only (no trailing slash, no path).
-     * Examples:
-     *  - "https://nga.com"
-     *  - "https://www.nga.com"
-     */
     const PARENT_ORIGIN = "https://ngacard.com";
 
     const sendHeight = () => {
@@ -56,17 +52,14 @@ const App: React.FC = () => {
       }
     };
 
-    // initial send
     sendHeight();
 
-    // send whenever layout changes (guard for older browsers)
     let ro: ResizeObserver | null = null;
     if ("ResizeObserver" in window) {
       ro = new ResizeObserver(() => sendHeight());
       ro.observe(document.documentElement);
     }
 
-    // if parent asks for height again
     const onMsg = (e: MessageEvent) => {
       if (e.data && e.data.type === "NGA_IFRAME_PING") sendHeight();
     };
@@ -92,7 +85,6 @@ const App: React.FC = () => {
   const lastSavedCardsRef = useRef<string>('');
   const CONCURRENCY_LIMIT = 2;
 
-  // Initial load from Drive
   const refreshCollection = useCallback(async (silent: boolean = false) => {
     if (!user || !getAccessToken) return;
     setSyncStatus('loading');
@@ -105,22 +97,52 @@ const App: React.FC = () => {
       lastSavedCardsRef.current = JSON.stringify(loadedCards || []);
     } catch (err: any) {
       console.error("Refresh collection failed:", err);
-      // Don't stay in loading state if silent sync fails
       setSyncStatus(silent ? 'idle' : 'error');
+    }
+  }, [user, getAccessToken]);
+
+  const handleSyncFromSheet = useCallback(async () => {
+    if (!user || !getAccessToken) return;
+    const sheetUrl = localStorage.getItem(SHEET_URL_STORAGE);
+    if (!sheetUrl) {
+      alert("Please set a Google Sheet URL in settings first.");
+      return;
+    }
+
+    try {
+      const token = await getAccessToken(false);
+      const sheetCards = await fetchCardsFromSheet(token, sheetUrl);
+      
+      if (sheetCards.length === 0) {
+        alert("No cards found in the provided sheet.");
+        return;
+      }
+
+      // Merge cards: keep current cards if they have images, but add any from sheet that aren't in state
+      // We use a combination of Name + Year + CardNumber as a fuzzy unique key for merging
+      setCards(prev => {
+        const existingKeys = new Set(prev.map(c => `${c.name}|${c.year}|${c.cardNumber}`));
+        const newOnes = sheetCards.filter(sc => !existingKeys.has(`${sc.name}|${sc.year}|${sc.cardNumber}`));
+        const combined = [...prev, ...newOnes];
+        // Sort by timestamp if available
+        return combined.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      });
+      
+      alert(`Successfully imported ${sheetCards.length} cards from Google Sheet.`);
+    } catch (err: any) {
+      console.error("Sync from sheet failed:", err);
+      throw err;
     }
   }, [user, getAccessToken]);
 
   useEffect(() => {
     if (user && isAuthReady) {
-      // Trigger silent sync once auth is ready
       refreshCollection(true);
     }
   }, [user, isAuthReady, refreshCollection]);
 
-  // Periodic persistence to Drive
   useEffect(() => {
     const saveTimeout = setTimeout(async () => {
-      // Don't auto-save if something is actively grading to avoid write conflicts
       const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
       const currentCardsStr = JSON.stringify(cards);
       
@@ -139,7 +161,6 @@ const App: React.FC = () => {
     return () => clearTimeout(saveTimeout);
   }, [cards, user, getAccessToken, driveFileId]);
 
-  // Task Processor
   const processCardInBackground = useCallback(async (cardToProcess: CardData) => {
     if (processingCards.current.has(cardToProcess.id)) return;
     processingCards.current.add(cardToProcess.id);
@@ -208,12 +229,10 @@ const App: React.FC = () => {
       status: 'grading' 
     };
     
-    // Switch to history immediately to show the user that something is happening
     setView('history');
     setCards(current => [newCard, ...current]);
   }, []);
 
-  // Scanner should only be blocked by primary grading tasks, not price fetching
   const isBlockingProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary'].includes(c.status));
 
   return (
@@ -249,6 +268,7 @@ const App: React.FC = () => {
             onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
             onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
             onLoadCollection={() => refreshCollection(false)} 
+            onSyncFromSheet={handleSyncFromSheet}
             onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
             userName={user?.name || 'Anonymous'}
           />
