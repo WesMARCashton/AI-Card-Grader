@@ -89,7 +89,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
 
   const handleSyncFromSheet = async () => {
     if (!props.onSyncFromSheet) return;
-    if (!window.confirm("This will pull all records from your Google Sheet. It may take a moment. Continue?")) return;
+    if (!window.confirm("This will pull all records from your Google Sheet. Continue?")) return;
     
     setIsPullingFromSheet(true);
     try {
@@ -107,7 +107,10 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
             <button onClick={props.onBack} className="flex items-center gap-2 text-blue-600 font-bold hover:text-blue-500 transition">
                 <BackIcon className="w-5 h-5" /> Back
             </button>
-            <h1 className="text-2xl font-bold">My Collection</h1>
+            <div className="text-center">
+                <h1 className="text-2xl font-bold">My Collection</h1>
+                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Total cached items: {props.cards.length}</p>
+            </div>
             <button onClick={() => setIsSheetSettingsOpen(true)} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition">
                 <CogIcon className="w-5 h-5" />
             </button>
@@ -128,7 +131,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
                   className="flex items-center gap-2 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
                 >
                     {isPullingFromSheet ? <SpinnerIcon className="w-5 h-5" /> : <ResyncIcon className="w-5 h-5" />}
-                    <span className="hidden sm:inline">{isPullingFromSheet ? 'Pulling...' : 'Sync From Sheet'}</span>
+                    <span className="hidden sm:inline">{isPullingFromSheet ? 'Syncing...' : 'Sync From Sheet'}</span>
                 </button>
                 <button 
                   onClick={handleResyncAll} 

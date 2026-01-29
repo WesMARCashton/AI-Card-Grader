@@ -83,8 +83,15 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
     const spreadsheetId = getSheetIdFromUrl(sheetUrl);
     if (!spreadsheetId) throw new Error("Invalid Google Sheet URL.");
 
-    // Fetching A:V which contains 22 columns of data
-    const response = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/A:V`, {
+    const sheetMetaResponse = await fetch(`${SHEETS_API_URL}/${spreadsheetId}?fields=sheets(properties.title)`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    const sheetMetaData = await sheetMetaResponse.json();
+    if (!sheetMetaData.sheets || sheetMetaData.sheets.length === 0) throw new Error("No sheets found in spreadsheet.");
+    const firstSheetName = sheetMetaData.sheets[0].properties.title;
+
+    // Fetch full range to ensure no truncation
+    const response = await fetch(`${SHEETS_API_URL}/${spreadsheetId}/values/'${encodeURIComponent(firstSheetName)}'!A:V`, {
         headers: { 'Authorization': `Bearer ${accessToken}` },
     });
     if (!response.ok) throw new Error("Could not load Master Sheet data.");
@@ -92,32 +99,39 @@ export const fetchCardsFromSheet = async (accessToken: string, sheetUrl: string)
     const data = await response.json();
     if (!data.values || data.values.length <= 1) return [];
 
-    // Filter out rows that are entirely empty or clearly not card data (header rows that aren't the first)
+    // Filter out rows that are entirely empty. 
+    // We check columns A, B, C, D (Year, Company, Team, Name) - if all are empty, we skip the row.
     return data.values.slice(1)
-        .filter((row: any[]) => row.length > 3 && (row[3] || row[0])) // Must have Name or Year
+        .filter((row: any[]) => row.length > 0 && (row[0] || row[1] || row[3]))
         .map((row: any[], index: number) => {
             const details: EvaluationDetails = {
-                centering: { grade: parseFloat(row[11]), notes: row[12] || '' },
-                corners: { grade: parseFloat(row[13]), notes: row[14] || '' },
-                edges: { grade: parseFloat(row[15]), notes: row[16] || '' },
-                surface: { grade: parseFloat(row[17]), notes: row[18] || '' },
-                printQuality: { grade: parseFloat(row[19]), notes: row[20] || '' },
+                centering: { grade: parseFloat(row[11]) || 0, notes: row[12] || '' },
+                corners: { grade: parseFloat(row[13]) || 0, notes: row[14] || '' },
+                edges: { grade: parseFloat(row[15]) || 0, notes: row[16] || '' },
+                surface: { grade: parseFloat(row[17]) || 0, notes: row[18] || '' },
+                printQuality: { grade: parseFloat(row[19]) || 0, notes: row[20] || '' },
             };
 
+            const overallGrade = parseFloat(row[8]) || 0;
+            const name = row[3] || 'Unknown Card';
+            const year = row[0] || 'N/A';
+
             return {
-                id: `sheet-${index}-${Date.now()}`,
+                // Stable deterministic ID for this specific row entry
+                id: `sheet-${index}-${year}-${name}`.replace(/\s+/g, '-').toLowerCase(),
                 status: 'reviewed',
-                year: row[0] || '',
+                year: year,
                 company: row[1] || '',
                 team: row[2] || '',
-                name: row[3] || '',
+                name: name,
                 edition: row[4] || '',
                 set: row[5] || '',
                 cardNumber: row[6] || '',
                 gradeName: row[7] || '',
-                overallGrade: parseFloat(row[8]) || 0,
+                overallGrade: overallGrade,
                 scannedBy: row[9] || 'Sheet Import',
-                timestamp: row[10] ? (isNaN(new Date(row[10]).getTime()) ? Date.now() : new Date(row[10]).getTime()) : Date.now(),
+                // Stagger timestamps so they sort in the order they appear in the sheet
+                timestamp: Date.now() - (index * 1000), 
                 details,
                 summary: row[21] || '',
                 gradingSystem: 'NGA',

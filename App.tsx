@@ -14,7 +14,7 @@ import {
 import { getCollection, saveCollection } from './services/driveService';
 import { fetchCardsFromSheet } from './services/sheetsService';
 import { HistoryIcon, SpinnerIcon } from './components/icons';
-import { dataUrlToBase64 } from './fileUtils';
+import { dataUrlToBase64 } from './utils/fileUtils';
 import { ApiKeyModal } from './components/ApiKeyModal';
 
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
@@ -114,23 +114,39 @@ const App: React.FC = () => {
       const sheetCards = await fetchCardsFromSheet(token, sheetUrl);
       
       if (sheetCards.length === 0) {
-        alert("No cards found in the provided sheet.");
+        alert("No valid records found in the spreadsheet.");
         return;
       }
 
-      // Merge cards: keep current cards if they have images, but add any from sheet that aren't in state
-      // We use a combination of Name + Year + CardNumber as a fuzzy unique key for merging
       setCards(prev => {
-        const existingKeys = new Set(prev.map(c => `${c.name}|${c.year}|${c.cardNumber}`));
-        const newOnes = sheetCards.filter(sc => !existingKeys.has(`${sc.name}|${sc.year}|${sc.cardNumber}`));
-        const combined = [...prev, ...newOnes];
-        // Sort by timestamp if available
+        // Build a unique fingerprint for existing cards that HAVE images
+        // Fingerprint includes Grade and Company to prevent collapsing player duplicates
+        const existingFingerprints = new Set(
+          prev
+            .filter(c => c.frontImage || c.backImage)
+            .map(c => `${c.name}|${c.year}|${c.company}|${c.set}|${c.cardNumber}|${c.overallGrade}`.toLowerCase())
+        );
+
+        // Also track IDs to prevent duplicate sheet row imports
+        const existingIds = new Set(prev.map(c => c.id));
+
+        const newToMerge = sheetCards.filter(sc => {
+          if (existingIds.has(sc.id)) return false;
+          
+          const fingerprint = `${sc.name}|${sc.year}|${sc.company}|${sc.set}|${sc.cardNumber}|${sc.overallGrade}`.toLowerCase();
+          // If we have an image-based local copy, don't import the imageless sheet row as a duplicate
+          return !existingFingerprints.has(fingerprint);
+        });
+
+        const combined = [...prev, ...newToMerge];
+        // Sort descending by timestamp
         return combined.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       });
       
-      alert(`Successfully imported ${sheetCards.length} cards from Google Sheet.`);
+      alert(`Sync Complete!\n\nSuccessfully retrieved ${sheetCards.length} rows from the Master Sheet.`);
     } catch (err: any) {
       console.error("Sync from sheet failed:", err);
+      alert("Error syncing from sheet: " + err.message);
       throw err;
     }
   }, [user, getAccessToken]);
