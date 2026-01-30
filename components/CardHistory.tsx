@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { CardData } from '../types';
 import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon, CogIcon } from './icons';
@@ -77,13 +76,25 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
   const [isPullingFromSheet, setIsPullingFromSheet] = useState(false);
 
-  // Status-based filters. We cover every single status to ensure no card is hidden.
-  const collectionCards = props.cards.filter(c => ['reviewed', 'fetching_value'].includes(c.status));
-  const needsReviewCards = props.cards.filter(c => ['needs_review', 'grading_failed', 'grading', 'challenging', 'generating_summary', 'regenerating_summary'].includes(c.status));
-  
-  // Safety check: cards that don't match either of the above for some reason
-  const uncategorizedCards = props.cards.filter(c => 
-    !collectionCards.some(x => x.id === c.id) && !needsReviewCards.some(x => x.id === c.id)
+  // ✅ New rule: NO card is hidden. We only group them.
+  const inProgressCards = props.cards.filter(c =>
+    ['grading', 'challenging', 'generating_summary', 'regenerating_summary', 'fetching_value'].includes(c.status)
+  );
+
+  const needsReviewCards = props.cards.filter(c =>
+    ['needs_review', 'grading_failed'].includes(c.status)
+  );
+
+  // Everything else (including 'reviewed' AND any legacy/unknown status) goes into Collection.
+  const collectionCards = props.cards.filter(c =>
+    !inProgressCards.some(x => x.id === c.id) && !needsReviewCards.some(x => x.id === c.id)
+  );
+
+  // Keep debug list, but it should normally be empty now.
+  const uncategorizedCards = props.cards.filter(c =>
+    !inProgressCards.some(x => x.id === c.id) &&
+    !needsReviewCards.some(x => x.id === c.id) &&
+    !collectionCards.some(x => x.id === c.id)
   );
 
   const unsyncedCards = props.cards.filter(c => !c.isSynced);
@@ -163,9 +174,18 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
         </div>
 
         <div className="space-y-8">
+            {inProgressCards.length > 0 && (
+                <div className="space-y-3">
+                    <h2 className="text-lg font-bold text-blue-700">In Progress</h2>
+                    {inProgressCards.map(c => (
+                        <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
+                    ))}
+                </div>
+            )}
+
             {needsReviewCards.length > 0 && (
                 <div className="space-y-3">
-                    <h2 className="text-lg font-bold text-blue-700">In Progress / Pending Review</h2>
+                    <h2 className="text-lg font-bold text-blue-700">Pending Review / Issues</h2>
                     {needsReviewCards.map(c => (
                         <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
                     ))}

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -29,6 +28,37 @@ if (typeof window !== 'undefined') {
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
+};
+
+/**
+ * Normalize legacy/partial cards loaded from Drive so they don't get hidden
+ * by UI filters (e.g., CardHistory only showing certain statuses).
+ */
+const normalizeLoadedCards = (loadedCards: any[]): CardData[] => {
+  if (!Array.isArray(loadedCards)) return [];
+
+  return loadedCards.map((c: any) => {
+    const hasOverallGrade =
+      typeof c?.overallGrade === 'number' &&
+      !Number.isNaN(c.overallGrade);
+
+    // If status is missing/legacy, infer:
+    // - graded cards => reviewed (shows in Collection)
+    // - otherwise => needs_review (shows in Pending)
+    const normalizedStatus: CardData['status'] =
+      (typeof c?.status === 'string'
+        ? c.status
+        : (hasOverallGrade ? 'reviewed' : 'needs_review')) as CardData['status'];
+
+    return {
+      ...c,
+      id: c?.id || generateId(),
+      status: normalizedStatus,
+      gradingSystem: c?.gradingSystem || 'NGA',
+      isSynced: typeof c?.isSynced === 'boolean' ? c.isSynced : false,
+      timestamp: typeof c?.timestamp === 'number' ? c.timestamp : Date.now(),
+    } as CardData;
+  });
 };
 
 const App: React.FC = () => {
@@ -91,10 +121,14 @@ const App: React.FC = () => {
     try {
       const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
-      setCards(loadedCards || []);
+
+      // ✅ Normalize legacy/partial cards so UI filters don't hide them
+      const normalized = normalizeLoadedCards(loadedCards || []);
+      setCards(normalized);
+
       setDriveFileId(fileId);
       setSyncStatus('success');
-      lastSavedCardsRef.current = JSON.stringify(loadedCards || []);
+      lastSavedCardsRef.current = JSON.stringify(normalized);
     } catch (err: any) {
       console.error("Refresh collection failed:", err);
       setSyncStatus(silent ? 'idle' : 'error');
