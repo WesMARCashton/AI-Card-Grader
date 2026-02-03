@@ -31,23 +31,11 @@ const generateId = () => {
   return Date.now().toString(36) + Math.random().toString(36).substring(2);
 };
 
-/**
- * Normalize legacy/partial cards loaded from Drive so they don't get hidden
- * by UI filters (e.g., CardHistory only showing certain statuses).
- */
 const normalizeLoadedCards = (loadedCards: any[]): CardData[] => {
   if (!Array.isArray(loadedCards)) return [];
-
   return loadedCards.map((c: any) => {
     if (!c) return null;
-    
-    const hasOverallGrade =
-      typeof c?.overallGrade === 'number' &&
-      !Number.isNaN(c.overallGrade);
-
-    // If status is missing/legacy, infer:
-    // - graded cards => reviewed (shows in Collection)
-    // - otherwise => needs_review (shows in Pending)
+    const hasOverallGrade = typeof c?.overallGrade === 'number' && !Number.isNaN(c.overallGrade);
     const normalizedStatus: CardData['status'] =
       (typeof c?.status === 'string'
         ? c.status
@@ -58,7 +46,7 @@ const normalizeLoadedCards = (loadedCards: any[]): CardData[] => {
       id: c?.id || generateId(),
       status: normalizedStatus,
       gradingSystem: c?.gradingSystem || 'NGA',
-      isSynced: typeof c?.isSynced === 'boolean' ? c.isSynced : true, // Assume synced if coming from drive
+      isSynced: typeof c?.isSynced === 'boolean' ? c.isSynced : true,
       timestamp: typeof c?.timestamp === 'number' ? c.timestamp : Date.now(),
     } as CardData;
   }).filter((c): c is CardData => c !== null);
@@ -101,7 +89,6 @@ const App: React.FC = () => {
   const [cards, setCards] = useState<CardData[]>([]);
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
   const processingCards = useRef(new Set<string>());
@@ -116,6 +103,7 @@ const App: React.FC = () => {
     
     setSyncStatus('loading');
     try {
+      // Get the token first. This might trigger a popup if not silent.
       const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
 
@@ -127,17 +115,23 @@ const App: React.FC = () => {
       
       if (!silent) {
         if (normalized.length > 0) {
-          alert(`Success! Loaded ${normalized.length} cards from your Google Drive.`);
+          alert(`Successfully loaded ${normalized.length} cards from Google Drive.`);
         } else {
-          alert("Your Google Drive collection is currently empty.");
+          alert("Your collection on Google Drive is currently empty.");
         }
       }
     } catch (err: any) {
       console.error("Refresh collection failed:", err);
       setSyncStatus(silent ? 'idle' : 'error');
+      
+      // Don't alert if silent fails (common on first load or session expiry)
       if (!silent) {
-        const msg = err.message || "Failed to connect to Google Drive.";
-        alert(`Error: ${msg}\n\nMake sure you have granted the required permissions when prompted.`);
+        const msg = err.message || "Failed to load collection.";
+        if (msg.includes('popup_blocked')) {
+          alert("The login popup was blocked by your browser. Please allow popups for this site and try again.");
+        } else {
+          alert(`Could not load Drive collection: ${msg}`);
+        }
       }
     }
   }, [user, getAccessToken]);
@@ -166,17 +160,16 @@ const App: React.FC = () => {
         return combined.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       });
       
-      alert(`Sync Complete!\n\nSuccessfully loaded ${sheetCards.length} records from Google Sheets.`);
+      alert(`Successfully loaded ${sheetCards.length} records from Google Sheets.`);
     } catch (err: any) {
       console.error("Sync from sheet failed:", err);
       alert("Error syncing from sheet: " + err.message);
-      throw err;
     }
   }, [user, getAccessToken]);
 
   useEffect(() => {
     if (user && isAuthReady) {
-      // Try a silent refresh on mount/login
+      // Silent refresh on mount/login
       refreshCollection(true);
     }
   }, [user, isAuthReady, refreshCollection]);
@@ -196,7 +189,7 @@ const App: React.FC = () => {
           console.error("Auto-save failed:", err);
         }
       }
-    }, 5000); // 5s debounce for saves
+    }, 5000);
 
     return () => clearTimeout(saveTimeout);
   }, [cards, user, getAccessToken, driveFileId]);

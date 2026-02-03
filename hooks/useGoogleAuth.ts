@@ -18,28 +18,35 @@ function decodeJwt(token: string): any {
 
 interface CachedToken {
   token: string;
-  expiresAt: number; // Expiration timestamp in milliseconds
+  expiresAt: number;
+}
+
+interface TokenRequest {
+  resolve: (token: string) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
 }
 
 export const useGoogleAuth = () => {
   const [user, setUser] = useState<User | null>(() => {
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-        try {
-            return JSON.parse(savedUser);
-        } catch (e) {
-            console.error("Failed to parse user from localStorage", e);
-            localStorage.removeItem('user');
-            return null;
-        }
+      try {
+        return JSON.parse(savedUser);
+      } catch (e) {
+        localStorage.removeItem('user');
+        return null;
+      }
     }
     return null;
   });
-  const [tokenClient, setTokenClient] = useState<any>(null);
-  const [isAuthReady, setIsAuthReady] = useState(false); 
-  const inFlightTokenRequest = useRef<Promise<string> | null>(null);
-  const cachedTokenRef = useRef<CachedToken | null>(null);
 
+  const [tokenClient, setTokenClient] = useState<any>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  
+  // Use a ref to store the current pending token request to avoid stale closures in the GIS callback
+  const pendingRequestRef = useRef<TokenRequest | null>(null);
+  const cachedTokenRef = useRef<CachedToken | null>(null);
 
   const handleCredentialResponse = (response: any) => {
     const idToken = response.credential;
@@ -58,7 +65,7 @@ export const useGoogleAuth = () => {
 
   const signOut = useCallback(() => {
     if (typeof google !== 'undefined' && google.accounts) {
-        google.accounts.id.disableAutoSelect();
+      google.accounts.id.disableAutoSelect();
     }
     setUser(null);
     localStorage.removeItem('user');
@@ -67,112 +74,99 @@ export const useGoogleAuth = () => {
 
   useEffect(() => {
     const initializeGsi = () => {
-        const clientId = document.querySelector<HTMLMetaElement>('meta[name="google-signin-client_id"]')?.content;
+      const clientId = document.querySelector<HTMLMetaElement>('meta[name="google-signin-client_id"]')?.content;
+      if (!clientId || typeof google === 'undefined') {
+        setIsAuthReady(true);
+        return;
+      }
 
-        if (!clientId) {
-             console.error("Google Client ID not found.");
-             setIsAuthReady(true);
-             return;
-        }
+      google.accounts.id.initialize({
+        client_id: clientId,
+        callback: handleCredentialResponse,
+        auto_select: true
+      });
 
-        if (typeof google !== 'undefined' && google.accounts) {
-            google.accounts.id.initialize({
-                client_id: clientId,
-                callback: handleCredentialResponse,
-                auto_select: true
-            });
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets',
+        callback: (tokenResponse: any) => {
+          const req = pendingRequestRef.current;
+          if (!req) return;
 
-            const client = google.accounts.oauth2.initTokenClient({
-              client_id: clientId,
-              scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets',
-              callback: (tokenResponse: any) => {
-                // Global callback for the client, will be handled by individual request promises
-                if (tokenClient?.onTokenResponse) {
-                  tokenClient.onTokenResponse(tokenResponse);
-                }
-              },
-            });
-            setTokenClient(client);
-            setIsAuthReady(true); 
-        }
-    }
-    
+          clearTimeout(req.timeoutId);
+          pendingRequestRef.current = null;
+
+          if (tokenResponse && tokenResponse.access_token) {
+            const expiresInMs = (tokenResponse.expires_in || 3600) * 1000;
+            cachedTokenRef.current = {
+              token: tokenResponse.access_token,
+              expiresAt: Date.now() + expiresInMs,
+            };
+            req.resolve(tokenResponse.access_token);
+          } else {
+            const errorMsg = tokenResponse?.error_description || tokenResponse?.error || 'Failed to retrieve access token.';
+            req.reject(new Error(errorMsg));
+          }
+        },
+      });
+
+      setTokenClient(client);
+      setIsAuthReady(true);
+    };
+
     if (typeof google !== 'undefined') {
-        initializeGsi();
+      initializeGsi();
     } else {
       const script = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
       if (script) {
         script.addEventListener('load', initializeGsi);
-        return () => script.removeEventListener('load', initializeGsi);
       }
     }
   }, []);
 
   const getAccessToken = useCallback((silent: boolean = false): Promise<string> => {
+    // 1. Check Cache
     if (cachedTokenRef.current && Date.now() < cachedTokenRef.current.expiresAt - (5 * 60 * 1000)) {
       return Promise.resolve(cachedTokenRef.current.token);
     }
-    
-    if (inFlightTokenRequest.current) {
-      return inFlightTokenRequest.current;
+
+    // 2. Prevent overlapping requests
+    if (pendingRequestRef.current) {
+      if (!silent) console.warn("A token request is already in progress.");
+      // If the current request is silent and a non-silent one comes in, we might want to override, 
+      // but for simplicity we'll just wait for the existing one.
     }
 
-    const authPromise = new Promise<string>((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       if (!tokenClient) {
-        inFlightTokenRequest.current = null;
-        return reject(new Error('Authentication client not ready.'));
+        return reject(new Error('Google Authentication client is not initialized yet.'));
       }
-      
-      const timeoutDuration = silent ? 5000 : 60000;
+
+      const timeoutDuration = silent ? 8000 : 90000; // Increased non-silent timeout for slower user interactions
       const timeoutId = setTimeout(() => {
-          tokenClient.onTokenResponse = null;
-          inFlightTokenRequest.current = null;
-          reject(new Error(silent ? 'Silent authentication failed.' : 'Authentication timed out. Please try again.'));
+        if (pendingRequestRef.current) {
+          const err = new Error(silent ? 'Silent authentication failed.' : 'Authentication timed out. Please check if the popup was blocked.');
+          pendingRequestRef.current.reject(err);
+          pendingRequestRef.current = null;
+        }
       }, timeoutDuration);
 
-      tokenClient.onTokenResponse = (tokenResponse: any) => {
-        clearTimeout(timeoutId);
-        tokenClient.onTokenResponse = null;
-        inFlightTokenRequest.current = null;
-        
-        if (tokenResponse && tokenResponse.access_token) {
-          const expiresInMs = (tokenResponse.expires_in || 3600) * 1000;
-          cachedTokenRef.current = {
-            token: tokenResponse.access_token,
-            expiresAt: Date.now() + expiresInMs,
-          };
-          resolve(tokenResponse.access_token);
-        } else {
-          const error = tokenResponse?.error_description || tokenResponse?.error || 'Failed to retrieve access token.';
-          // If silent fails, we don't want to spam the console with scary errors
-          if (!silent) console.error("OAuth2 Error:", tokenResponse);
-          reject(new Error(error));
-        }
-      };
-
-      const config: any = { 
-        prompt: silent ? '' : 'select_account',
-      };
-      
-      // Use hint if we have the user's email to make the process smoother
-      if (user?.email) {
-        config.hint = user.email;
-      }
+      pendingRequestRef.current = { resolve, reject, timeoutId };
 
       try {
-        tokenClient.requestAccessToken(config);
+        // 'prompt: none' only works if the user is already signed into Google and has authorized the app.
+        // It's the standard way to do "silent" token refresh in GIS.
+        tokenClient.requestAccessToken({
+          prompt: silent ? 'none' : 'select_account',
+          hint: user?.email || undefined
+        });
       } catch (err) {
         clearTimeout(timeoutId);
-        tokenClient.onTokenResponse = null;
-        inFlightTokenRequest.current = null;
-        reject(err);
+        pendingRequestRef.current = null;
+        reject(err instanceof Error ? err : new Error(String(err)));
       }
     });
-
-    inFlightTokenRequest.current = authPromise;
-    return inFlightTokenRequest.current;
   }, [tokenClient, user]);
-
 
   return { user, signOut, getAccessToken, isAuthReady };
 };
