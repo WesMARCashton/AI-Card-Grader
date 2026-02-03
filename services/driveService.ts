@@ -1,3 +1,4 @@
+
 import { CardData } from '../types';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
@@ -30,6 +31,7 @@ const findFileId = async (accessToken: string): Promise<string | null> => {
 
   const data = await response.json();
   const files = Array.isArray(data?.files) ? data.files : [];
+  console.log(`[DriveService] Found ${files.length} collection files.`);
   return files.length > 0 ? files[0].id : null;
 };
 
@@ -38,6 +40,7 @@ export const getCollection = async (
 ): Promise<{ fileId: string | null; cards: CardData[] }> => {
   const fileId = await findFileId(accessToken);
   if (!fileId) {
+    console.log("[DriveService] No existing collection file found in Google Drive.");
     return { fileId: null, cards: [] };
   }
 
@@ -62,6 +65,7 @@ export const getCollection = async (
 
   try {
     const cards = await response.json();
+    console.log(`[DriveService] Successfully parsed ${Array.isArray(cards) ? cards.length : 0} cards from JSON.`);
     return { fileId, cards: Array.isArray(cards) ? cards : [] };
   } catch (e) {
     console.error('Error parsing collection JSON:', e);
@@ -107,5 +111,6 @@ export const saveCollection = async (
   }
 
   const newFileData = await response.json();
+  console.log(`[DriveService] Collection saved. New File ID: ${newFileData.id}`);
   return newFileData.id;
 };

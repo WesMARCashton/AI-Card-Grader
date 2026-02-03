@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { CardData } from '../types';
 import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon, CogIcon } from './icons';
@@ -79,7 +80,7 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   // ✅ Force-load feedback states
   const [isForceLoading, setIsForceLoading] = useState(false);
 
-  // ✅ New rule: NO card is hidden. We only group them.
+  // Status-based groupings
   const inProgressCards = props.cards.filter(c =>
     ['grading', 'challenging', 'generating_summary', 'regenerating_summary', 'fetching_value'].includes(c.status)
   );
@@ -90,12 +91,6 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
 
   const collectionCards = props.cards.filter(c =>
     !inProgressCards.some(x => x.id === c.id) && !needsReviewCards.some(x => x.id === c.id)
-  );
-
-  const uncategorizedCards = props.cards.filter(c =>
-    !inProgressCards.some(x => x.id === c.id) &&
-    !needsReviewCards.some(x => x.id === c.id) &&
-    !collectionCards.some(x => x.id === c.id)
   );
 
   const unsyncedCards = props.cards.filter(c => !c.isSynced);
@@ -125,22 +120,13 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
 
   const handleForceLoadFromDrive = async () => {
     if (!props.onLoadCollection) {
-      alert("Force load is not available (missing handler).");
+      alert("Force load is not available.");
       return;
     }
 
     setIsForceLoading(true);
-    const before = props.cards.length;
-
     try {
-      // Ensure we surface failures instead of silently doing nothing
       await Promise.resolve(props.onLoadCollection());
-
-      // Give React a beat to render new cards
-      setTimeout(() => {
-        const after = props.cards.length;
-        console.log('[Force Load] before:', before, 'after:', after);
-      }, 0);
     } catch (e: any) {
       console.error('[Force Load] failed:', e);
       alert(`Force load failed: ${e?.message || e}`);
@@ -244,7 +230,14 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
             <div className="py-20 text-center text-slate-400 border-2 border-dashed rounded-xl bg-slate-50">
               <p className="mb-4">No cards found in memory.</p>
               <div className="flex gap-4 justify-center">
-                <button onClick={props.onLoadCollection} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Drive</button>
+                <button 
+                  onClick={handleForceLoadFromDrive} 
+                  disabled={isForceLoading}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 disabled:opacity-50"
+                >
+                    {isForceLoading && <SpinnerIcon className="w-5 h-5" />}
+                    {isForceLoading ? 'Loading...' : 'Load from Drive'}
+                </button>
                 <button onClick={handleSyncFromSheet} className="bg-green-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Sheet</button>
               </div>
             </div>
@@ -254,15 +247,6 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
             ))
           )}
         </div>
-
-        {uncategorizedCards.length > 0 && (
-          <div className="space-y-3">
-            <h2 className="text-lg font-bold text-slate-500 italic">Uncategorized / Debug</h2>
-            {uncategorizedCards.map(c => (
-              <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
-            ))}
-          </div>
-        )}
       </div>
 
       {selectedCard && (

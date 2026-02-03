@@ -1,7 +1,0 @@
-{
-  "name": "NGA Card Grader",
-  "description": "An application that uses AI to scan and grade sports cards based on the NGA rating system. Users can capture images using their camera or upload them, receive a detailed grade, save their collection, and export it to a CSV file.",
-  "requestFramePermissions": [
-    "camera"
-  ]
-}

@@ -69,9 +69,8 @@ export const useGoogleAuth = () => {
     const initializeGsi = () => {
         const clientId = document.querySelector<HTMLMetaElement>('meta[name="google-signin-client_id"]')?.content;
 
-        if (!clientId || clientId.startsWith('716520201321')) { // Allow provided ID
-        } else {
-             console.error("Google Client ID not found or not configured.");
+        if (!clientId) {
+             console.error("Google Client ID not found.");
              setIsAuthReady(true);
              return;
         }
@@ -80,12 +79,18 @@ export const useGoogleAuth = () => {
             google.accounts.id.initialize({
                 client_id: clientId,
                 callback: handleCredentialResponse,
+                auto_select: true
             });
 
             const client = google.accounts.oauth2.initTokenClient({
               client_id: clientId,
               scope: 'https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets',
-              callback: () => {}, // Callback is overridden per request
+              callback: (tokenResponse: any) => {
+                // Global callback for the client, will be handled by individual request promises
+                if (tokenClient?.onTokenResponse) {
+                  tokenClient.onTokenResponse(tokenResponse);
+                }
+              },
             });
             setTokenClient(client);
             setIsAuthReady(true); 
@@ -118,15 +123,16 @@ export const useGoogleAuth = () => {
         return reject(new Error('Authentication client not ready.'));
       }
       
-      // Shorter timeout for silent requests to prevent hanging
-      const timeoutDuration = silent ? 5000 : 20000;
+      const timeoutDuration = silent ? 5000 : 60000;
       const timeoutId = setTimeout(() => {
+          tokenClient.onTokenResponse = null;
           inFlightTokenRequest.current = null;
-          reject(new Error(silent ? 'Silent authentication failed.' : 'Authentication timed out.'));
+          reject(new Error(silent ? 'Silent authentication failed.' : 'Authentication timed out. Please try again.'));
       }, timeoutDuration);
 
-      tokenClient.callback = (tokenResponse: any) => {
+      tokenClient.onTokenResponse = (tokenResponse: any) => {
         clearTimeout(timeoutId);
+        tokenClient.onTokenResponse = null;
         inFlightTokenRequest.current = null;
         
         if (tokenResponse && tokenResponse.access_token) {
@@ -138,17 +144,34 @@ export const useGoogleAuth = () => {
           resolve(tokenResponse.access_token);
         } else {
           const error = tokenResponse?.error_description || tokenResponse?.error || 'Failed to retrieve access token.';
+          // If silent fails, we don't want to spam the console with scary errors
+          if (!silent) console.error("OAuth2 Error:", tokenResponse);
           reject(new Error(error));
         }
       };
 
-      const config = silent ? { prompt: '' } : { prompt: 'consent' };
-      tokenClient.requestAccessToken(config);
+      const config: any = { 
+        prompt: silent ? '' : 'select_account',
+      };
+      
+      // Use hint if we have the user's email to make the process smoother
+      if (user?.email) {
+        config.hint = user.email;
+      }
+
+      try {
+        tokenClient.requestAccessToken(config);
+      } catch (err) {
+        clearTimeout(timeoutId);
+        tokenClient.onTokenResponse = null;
+        inFlightTokenRequest.current = null;
+        reject(err);
+      }
     });
 
     inFlightTokenRequest.current = authPromise;
     return inFlightTokenRequest.current;
-  }, [tokenClient]);
+  }, [tokenClient, user]);
 
 
   return { user, signOut, getAccessToken, isAuthReady };

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
@@ -38,6 +39,8 @@ const normalizeLoadedCards = (loadedCards: any[]): CardData[] => {
   if (!Array.isArray(loadedCards)) return [];
 
   return loadedCards.map((c: any) => {
+    if (!c) return null;
+    
     const hasOverallGrade =
       typeof c?.overallGrade === 'number' &&
       !Number.isNaN(c.overallGrade);
@@ -55,17 +58,16 @@ const normalizeLoadedCards = (loadedCards: any[]): CardData[] => {
       id: c?.id || generateId(),
       status: normalizedStatus,
       gradingSystem: c?.gradingSystem || 'NGA',
-      isSynced: typeof c?.isSynced === 'boolean' ? c.isSynced : false,
+      isSynced: typeof c?.isSynced === 'boolean' ? c.isSynced : true, // Assume synced if coming from drive
       timestamp: typeof c?.timestamp === 'number' ? c.timestamp : Date.now(),
     } as CardData;
-  });
+  }).filter((c): c is CardData => c !== null);
 };
 
 const App: React.FC = () => {
-  // ---- iframe auto-resize: report app height to parent (WordPress) ----
+  // ---- iframe auto-resize ----
   useEffect(() => {
     const PARENT_ORIGIN = "https://ngacard.com";
-
     const sendHeight = () => {
       const height = Math.max(
         document.documentElement.scrollHeight,
@@ -73,34 +75,25 @@ const App: React.FC = () => {
         document.documentElement.offsetHeight,
         document.body.offsetHeight
       );
-
       if (window.parent && window.parent !== window) {
-        window.parent.postMessage(
-          { type: "NGA_IFRAME_HEIGHT", height },
-          PARENT_ORIGIN
-        );
+        window.parent.postMessage({ type: "NGA_IFRAME_HEIGHT", height }, PARENT_ORIGIN);
       }
     };
-
     sendHeight();
-
     let ro: ResizeObserver | null = null;
     if ("ResizeObserver" in window) {
       ro = new ResizeObserver(() => sendHeight());
       ro.observe(document.documentElement);
     }
-
     const onMsg = (e: MessageEvent) => {
       if (e.data && e.data.type === "NGA_IFRAME_PING") sendHeight();
     };
     window.addEventListener("message", onMsg);
-
     return () => {
       ro && ro.disconnect();
       window.removeEventListener("message", onMsg);
     };
   }, []);
-  // ---- end iframe auto-resize ----
 
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   
@@ -116,22 +109,36 @@ const App: React.FC = () => {
   const CONCURRENCY_LIMIT = 2;
 
   const refreshCollection = useCallback(async (silent: boolean = false) => {
-    if (!user || !getAccessToken) return;
+    if (!user || !getAccessToken) {
+      if (!silent) alert("Please sign in first to load your collection.");
+      return;
+    }
+    
     setSyncStatus('loading');
     try {
       const token = await getAccessToken(silent);
       const { fileId, cards: loadedCards } = await getCollection(token);
 
-      // ✅ Normalize legacy/partial cards so UI filters don't hide them
       const normalized = normalizeLoadedCards(loadedCards || []);
       setCards(normalized);
-
       setDriveFileId(fileId);
       setSyncStatus('success');
       lastSavedCardsRef.current = JSON.stringify(normalized);
+      
+      if (!silent) {
+        if (normalized.length > 0) {
+          alert(`Success! Loaded ${normalized.length} cards from your Google Drive.`);
+        } else {
+          alert("Your Google Drive collection is currently empty.");
+        }
+      }
     } catch (err: any) {
       console.error("Refresh collection failed:", err);
       setSyncStatus(silent ? 'idle' : 'error');
+      if (!silent) {
+        const msg = err.message || "Failed to connect to Google Drive.";
+        alert(`Error: ${msg}\n\nMake sure you have granted the required permissions when prompted.`);
+      }
     }
   }, [user, getAccessToken]);
 
@@ -153,14 +160,9 @@ const App: React.FC = () => {
       }
 
       setCards(prev => {
-        // We stop using metadata fingerprints to deduplicate.
-        // If a user has 200 cards, and many are "Unknown", fingerprinting hides them.
-        // We only skip if the specific ID already exists in our current set.
         const existingIds = new Set(prev.map(c => c.id));
         const newToMerge = sheetCards.filter(sc => !existingIds.has(sc.id));
-
         const combined = [...prev, ...newToMerge];
-        // Sort descending by timestamp
         return combined.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       });
       
@@ -174,6 +176,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (user && isAuthReady) {
+      // Try a silent refresh on mount/login
       refreshCollection(true);
     }
   }, [user, isAuthReady, refreshCollection]);
@@ -183,7 +186,7 @@ const App: React.FC = () => {
       const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status));
       const currentCardsStr = JSON.stringify(cards);
       
-      if (user && getAccessToken && !criticalProcessing && currentCardsStr !== lastSavedCardsRef.current) {
+      if (user && getAccessToken && !criticalProcessing && currentCardsStr !== lastSavedCardsRef.current && cards.length > 0) {
         try {
           const token = await getAccessToken(true);
           const newFileId = await saveCollection(token, driveFileId, cards);
@@ -193,7 +196,7 @@ const App: React.FC = () => {
           console.error("Auto-save failed:", err);
         }
       }
-    }, 3000);
+    }, 5000); // 5s debounce for saves
 
     return () => clearTimeout(saveTimeout);
   }, [cards, user, getAccessToken, driveFileId]);
