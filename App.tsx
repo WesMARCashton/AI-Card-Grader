@@ -102,7 +102,9 @@ const App: React.FC = () => {
   }, []);
   // ---- end iframe auto-resize ----
 
-  const { user, signIn, signOut, getAccessToken, isAuthReady } = useFirebaseAuth();const [view, setView] = useState<AppView>('scanner');
+  const { user, signIn, signOut, getAccessToken, isAuthReady } = useFirebaseAuth();
+
+  const [view, setView] = useState<AppView>('scanner');
   const [cards, setCards] = useState<CardData[]>([]);
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
