@@ -20,7 +20,7 @@ import { ApiKeyModal } from './components/ApiKeyModal';
 const MANUAL_API_KEY_STORAGE = 'manual_gemini_api_key';
 const SHEET_URL_STORAGE = 'google_sheet_url';
 const LOCAL_CARDS_STORAGE = 'nga_card_collection_local';
-const LEGACY_STORAGE_KEYS = ['card_collection', 'cards', 'nga_cards']; // Known old keys
+const LEGACY_STORAGE_KEYS = ['card_collection', 'cards', 'nga_cards', 'nga_card_collection'];
 
 if (typeof window !== 'undefined') {
   if (!(window as any).process) (window as any).process = { env: {} };
@@ -86,41 +86,45 @@ const App: React.FC = () => {
   }, []);
 
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
-  
   const [view, setView] = useState<AppView>('scanner');
   
-  // Initialize from local storage + search for legacy data
-  const [cards, setCards] = useState<CardData[]>(() => {
-    let allCards: any[] = [];
+  // Migration Function: Searches all possible keys for data
+  const migrateLegacyData = useCallback(() => {
+    console.log("[Migration] Searching for legacy card data...");
+    let allFoundCards: any[] = [];
     
     // Check main key
-    const saved = localStorage.getItem(LOCAL_CARDS_STORAGE);
-    if (saved) {
-      try { allCards = JSON.parse(saved); } catch (e) {}
+    const current = localStorage.getItem(LOCAL_CARDS_STORAGE);
+    if (current) {
+        try { allFoundCards = JSON.parse(current); } catch(e) {}
     }
-    
-    // Check legacy keys to recover old data
+
+    // Aggressively check every other key used in past versions
     LEGACY_STORAGE_KEYS.forEach(key => {
-      const legacy = localStorage.getItem(key);
-      if (legacy) {
-        try {
-          const parsed = JSON.parse(legacy);
-          if (Array.isArray(parsed)) {
-            parsed.forEach(pc => {
-              if (!allCards.find(ac => ac.id === pc.id || (ac.timestamp === pc.timestamp && ac.name === pc.name))) {
-                allCards.push(pc);
-              }
-            });
-            console.log(`Recovered legacy data from ${key}`);
-            // We don't remove it yet to be safe, but migration is happening
-          }
-        } catch (e) {}
-      }
+        const data = localStorage.getItem(key);
+        if (data) {
+            try {
+                const parsed = JSON.parse(data);
+                if (Array.isArray(parsed)) {
+                    parsed.forEach(pCard => {
+                        // Check for duplicates by name/year if ID is missing or shared
+                        const isDuplicate = allFoundCards.find(ac => 
+                            ac.id === pCard.id || 
+                            (ac.name === pCard.name && ac.year === pCard.year && ac.frontImage === pCard.frontImage)
+                        );
+                        if (!isDuplicate) {
+                            allFoundCards.push(pCard);
+                        }
+                    });
+                }
+            } catch(e) {}
+        }
     });
 
-    return normalizeLoadedCards(allCards);
-  });
+    return normalizeLoadedCards(allFoundCards);
+  }, []);
 
+  const [cards, setCards] = useState<CardData[]>(migrateLegacyData);
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
@@ -129,6 +133,7 @@ const App: React.FC = () => {
   const lastSavedCardsRef = useRef<string>('');
   const CONCURRENCY_LIMIT = 2;
 
+  // Persist to local storage immediately whenever state changes
   useEffect(() => {
     localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
   }, [cards]);
@@ -141,28 +146,26 @@ const App: React.FC = () => {
     
     setSyncStatus('loading');
     try {
-      console.log("[App] Starting deep collection refresh...");
       const token = await getAccessToken(silent);
-      const { fileId, cards: loadedCards } = await getCollection(token);
+      const { fileId, cards: remoteData } = await getCollection(token);
 
-      const remoteCards = normalizeLoadedCards(loadedCards || []);
+      const remoteCards = normalizeLoadedCards(remoteData || []);
       
       setCards(prev => {
         const merged = [...prev];
         let addedCount = 0;
         
         remoteCards.forEach(remote => {
-          // Robust check for existing cards by ID, or approximate match if ID is missing/changed
           const exists = merged.find(m => 
             m.id === remote.id || 
-            (m.timestamp === remote.timestamp && m.name === remote.name && m.frontImage === remote.frontImage)
+            (m.name === remote.name && m.year === remote.year && m.frontImage === remote.frontImage)
           );
 
           if (!exists) {
             merged.push(remote);
             addedCount++;
           } else {
-            // Update existing card if remote is newer or has more info
+            // Update existing with newer info from remote
             const idx = merged.indexOf(exists);
             merged[idx] = { ...exists, ...remote };
           }
@@ -172,11 +175,11 @@ const App: React.FC = () => {
         
         if (!silent) {
           if (addedCount > 0) {
-            alert(`Sync Successful! Found ${addedCount} cards from previous sessions in your Drive.`);
+            alert(`Sync Successful! Added ${addedCount} cards from your Google Drive backup.`);
           } else if (remoteCards.length > 0) {
-            alert(`Collection synced! All ${remoteCards.length} cards from Drive are now showing.`);
+            alert(`Collection is synchronized. You have ${merged.length} cards total.`);
           } else {
-            alert("Search finished. Your Google Drive collection appears to be empty for this account.");
+            alert("Your Google Drive backup is currently empty. Your local cards will be backed up to Drive now.");
           }
         }
         
@@ -212,13 +215,16 @@ const App: React.FC = () => {
       }
 
       setCards(prev => {
-        const existingIds = new Set(prev.map(c => c.id));
-        const newToMerge = sheetCards.filter(sc => !existingIds.has(sc.id));
-        const combined = [...prev, ...newToMerge];
-        return combined.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        const merged = [...prev];
+        sheetCards.forEach(sc => {
+            if (!merged.find(m => m.id === sc.id || (m.name === sc.name && m.year === sc.year))) {
+                merged.push(sc);
+            }
+        });
+        return merged.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       });
       
-      alert(`Successfully loaded ${sheetCards.length} records from Google Sheets.`);
+      alert(`Successfully merged ${sheetCards.length} records from Google Sheets.`);
     } catch (err: any) {
       console.error("Sync from sheet failed:", err);
       alert("Error syncing from sheet: " + err.message);
@@ -227,10 +233,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (user && isAuthReady) {
-      refreshCollection(true);
+      refreshCollection(true); // Silent sync on login
     }
   }, [user, isAuthReady, refreshCollection]);
 
+  // Background Auto-Save to Drive
   useEffect(() => {
     const saveTimeout = setTimeout(async () => {
       const criticalProcessing = cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(c.status));
@@ -246,7 +253,7 @@ const App: React.FC = () => {
           console.error("Auto-save to Drive failed:", err);
         }
       }
-    }, 15000); // 15s debounce
+    }, 15000);
 
     return () => clearTimeout(saveTimeout);
   }, [cards, user, getAccessToken, driveFileId]);
