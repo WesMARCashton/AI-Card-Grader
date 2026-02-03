@@ -3,7 +3,8 @@ import { CardData, AppView, User } from './types';
 import { CardScanner } from './components/CardScanner';
 import { CardHistory } from './components/CardHistory';
 import { Auth } from './components/Auth';
-import { useFirebaseAuth } from './hooks/useFirebaseAuth';import { 
+import { useFirebaseAuth } from './hooks/useFirebaseAuth';
+import { 
   challengeGrade, 
   regenerateCardAnalysisForGrade,
   analyzeCardFull,
