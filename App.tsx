@@ -18,6 +18,15 @@ import { dataUrlToBase64 } from './utils/fileUtils';
 
 const SHEET_URL_STORAGE = 'google_sheet_url';
 const LOCAL_CARDS_STORAGE = 'nga_card_collection_local';
+const API_KEY_STORAGE_KEY = 'manual_gemini_api_key';
+
+// Initialize API Key from localStorage globally at runtime
+if (typeof window !== 'undefined') {
+    const savedKey = localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (savedKey) {
+        (process.env as any).API_KEY = savedKey;
+    }
+}
 
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -27,14 +36,16 @@ const generateId = () => {
 const normalizeCards = (data: any[]): CardData[] => {
   if (!Array.isArray(data)) return [];
   return data.map(c => {
-    if (!c) return null;
+    if (!c || typeof c !== 'object') return null;
     return {
       ...c,
       id: c.id || generateId(),
       status: c.status || (c.overallGrade ? 'reviewed' : 'needs_review'),
       timestamp: c.timestamp || Date.now(),
       gradingSystem: 'NGA',
-      isSynced: typeof c.isSynced === 'boolean' ? c.isSynced : true
+      isSynced: typeof c.isSynced === 'boolean' ? c.isSynced : true,
+      frontImage: c.frontImage || '',
+      backImage: c.backImage || ''
     } as CardData;
   }).filter((c): c is CardData => c !== null);
 };
@@ -60,13 +71,26 @@ const App: React.FC = () => {
   
   // Exhaustive Data Recovery: Scans EVERYTHING in local storage
   const [cards, setCards] = useState<CardData[]>(() => {
-    let recovered: any[] = [];
+    const recoveredMap = new Map<string, any>();
     
+    // Helper to add unique cards to our recovery map
+    const addToMap = (cardArray: any[]) => {
+        if (!Array.isArray(cardArray)) return;
+        cardArray.forEach(pCard => {
+            if (!pCard || !pCard.frontImage) return;
+            // Create a pseudo-unique key for deduplication if ID is missing
+            const uniqueKey = pCard.id || `${pCard.name}-${pCard.timestamp}`;
+            if (!recoveredMap.has(uniqueKey)) {
+                recoveredMap.set(uniqueKey, pCard);
+            }
+        });
+    };
+
     // 1. Try primary storage
     const primary = localStorage.getItem(LOCAL_CARDS_STORAGE);
-    if (primary) try { recovered = JSON.parse(primary); } catch(e) {}
+    if (primary) try { addToMap(JSON.parse(primary)); } catch(e) {}
 
-    // 2. Global Sweep: Look at every key for potential card arrays
+    // 2. Global Sweep: Look for ANY key that might contain cards
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key && key !== LOCAL_CARDS_STORAGE) {
@@ -74,36 +98,21 @@ const App: React.FC = () => {
           const val = localStorage.getItem(key);
           if (val && (val.includes('frontImage') || val.includes('overallGrade'))) {
             const parsed = JSON.parse(val);
-            if (Array.isArray(parsed)) {
-              parsed.forEach(pCard => {
-                // Deduplicate by name and timestamp
-                const isDupe = recovered.find(rc => rc.id === pCard.id || (rc.name === pCard.name && Math.abs(rc.timestamp - pCard.timestamp) < 5000));
-                if (!isDupe) recovered.push(pCard);
-              });
-            }
+            addToMap(parsed);
           }
         } catch(e) {}
       }
     }
-    return normalizeCards(recovered);
+    
+    const finalCards = Array.from(recoveredMap.values());
+    console.log(`[App] Initialized with ${finalCards.length} cards.`);
+    return normalizeCards(finalCards);
   });
 
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const processingCards = useRef(new Set<string>());
   const lastSavedRef = useRef('');
-
-  // API Key Selection logic
-  useEffect(() => {
-    const checkApiKey = async () => {
-      if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
-        // We don't force it here to avoid annoying popups, 
-        // but we ensure the mechanism is available in settings.
-        console.log("No API key selected in AI Studio context.");
-      }
-    };
-    checkApiKey();
-  }, []);
 
   useEffect(() => {
     localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
@@ -115,26 +124,35 @@ const App: React.FC = () => {
     try {
       const token = await getAccessToken(silent);
       const { fileId, cards: remoteData } = await getCollection(token);
-      const remoteCards = normalizeCards(remoteData);
       
-      setCards(prev => {
-        const merged = [...prev];
-        let added = 0;
-        remoteCards.forEach(rc => {
-          const exists = merged.find(m => m.id === rc.id || (m.name === rc.name && m.frontImage === rc.frontImage));
-          if (!exists) { merged.push(rc); added++; }
-          else { 
-            const idx = merged.indexOf(exists);
-            merged[idx] = { ...exists, ...rc };
-          }
-        });
-        if (!silent) {
-          if (added > 0) alert(`Success! Recovered ${added} cards from Google Drive.`);
-          else if (remoteCards.length > 0) alert("Collection is already up to date.");
-          else alert("No collection files were found in this Drive account.");
-        }
-        return merged.sort((a, b) => b.timestamp - a.timestamp);
-      });
+      // If Drive has data, merge it. If not, don't clear local.
+      if (remoteData && remoteData.length > 0) {
+          const remoteCards = normalizeCards(remoteData);
+          setCards(prev => {
+            const merged = [...prev];
+            let added = 0;
+            remoteCards.forEach(rc => {
+              // Check if already exists in local
+              const exists = merged.find(m => m.id === rc.id || (m.name === rc.name && m.frontImage === rc.frontImage));
+              if (!exists) { 
+                  merged.push(rc); 
+                  added++; 
+              } else { 
+                const idx = merged.indexOf(exists);
+                // Update local with remote data if remote is potentially newer
+                merged[idx] = { ...exists, ...rc };
+              }
+            });
+            if (!silent) {
+              if (added > 0) alert(`Success! Merged ${added} new cards from Google Drive.`);
+              else alert("Your collection is up to date.");
+            }
+            return merged.sort((a, b) => b.timestamp - a.timestamp);
+          });
+      } else if (!silent) {
+          alert("No collection data found on Google Drive for this account.");
+      }
+      
       setDriveFileId(fileId);
       setSyncStatus('success');
     } catch (e) {
@@ -156,14 +174,14 @@ const App: React.FC = () => {
       const sheetCards = await fetchCardsFromSheet(token, url);
       setCards(prev => {
         const merged = [...prev];
-        let added = 0;
+        let addedCount = 0;
         sheetCards.forEach(sc => {
-          if (!merged.find(m => m.id === sc.id || (m.name === sc.name && m.year === sc.year))) {
+          if (!merged.find(m => m.id === sc.id || (m.name === sc.name && m.year === sc.year && m.cardNumber === sc.cardNumber))) {
             merged.push(sc);
-            added++;
+            addedCount++;
           }
         });
-        if (added > 0) alert(`Imported ${added} new records from sheet.`);
+        alert(`Imported ${addedCount} new records from sheet.`);
         return merged.sort((a, b) => b.timestamp - a.timestamp);
       });
     } catch (e: any) { alert("Sheet sync failed: " + e.message); }
@@ -192,8 +210,10 @@ const App: React.FC = () => {
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false } : c));
     } catch (e: any) {
-      if (e.message === 'API_KEY_MISSING' && window.aistudio) {
-          window.aistudio.openSelectKey();
+      // If we hit an API key error, show the settings to prompt for one
+      if (e.message === 'API_KEY_MISSING') {
+          alert("API Key is missing. Please enter your Gemini API Key in Settings (cog icon).");
+          setView('history');
       }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
     } finally { processingCards.current.delete(card.id); }
@@ -201,7 +221,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
-    if (queue.length > 0 && processingCards.current.size < 2) queue.slice(0, 2 - processingCards.current.size).forEach(processCard);
+    if (queue.length > 0 && processingCards.current.size < 2) {
+        queue.slice(0, 2 - processingCards.current.size).forEach(processCard);
+    }
   }, [cards, processCard]);
 
   useEffect(() => {
@@ -225,8 +247,8 @@ const App: React.FC = () => {
         <img src="https://mcusercontent.com/d7331d7f90c4b088699bd7282/images/98cb8f09-7621-798a-803a-26d394c7b10f.png" alt="Logo" className="h-10" />
         <div className="flex gap-2">
           {user && (
-            <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="flex items-center gap-2 py-2 px-4 bg-white/70 rounded-lg shadow-md border border-slate-300">
-              <HistoryIcon className="h-5 w-5" /> Collection
+            <button onClick={() => setView(view === 'history' ? 'scanner' : 'history')} className="flex items-center gap-2 py-2 px-4 bg-white/70 rounded-lg shadow-md border border-slate-300 transition hover:bg-white text-slate-800 font-semibold">
+              <HistoryIcon className="h-5 w-5 text-blue-500" /> Collection ({cards.length})
             </button>
           )}
           <Auth user={user} onSignOut={signOut} isAuthReady={isAuthReady} />
@@ -238,7 +260,7 @@ const App: React.FC = () => {
             cards={cards} onBack={() => setView('scanner')} onDelete={id => setCards(cur => cur.filter(c => c.id !== id))} 
             getAccessToken={() => getAccessToken(false)} onCardsSynced={synced => setCards(cur => cur.map(c => synced.some(s => s.id === c.id) ? { ...c, isSynced: true } : c))}
             onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
-            onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading' } : x))}
+            onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
             onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
             onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
             onLoadCollection={() => refreshCollection(false)} onSyncFromSheet={handleSyncFromSheet}
@@ -248,7 +270,7 @@ const App: React.FC = () => {
             isRewriting={false} rewriteProgress={0} rewrittenCount={0} rewriteFailCount={0} rewriteStatusMessage={''}
           />
         ) : (
-          <CardScanner onRatingRequest={(f, b) => { setCards(cur => [{ id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', status: 'grading' }, ...cur]); setView('history'); }} isGrading={cards.some(c => c.status === 'grading')} isLoggedIn={!!user} hasCards={cards.length > 0} onSyncDrive={() => refreshCollection(false)} isSyncing={syncStatus === 'loading'} />
+          <CardScanner onRatingRequest={(f, b) => { setCards(cur => [{ id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', status: 'grading' }, ...cur]); setView('history'); }} isGrading={cards.some(c => ['grading', 'challenging'].includes(c.status))} isLoggedIn={!!user} hasCards={cards.length > 0} onSyncDrive={() => refreshCollection(false)} isSyncing={syncStatus === 'loading'} />
         )}
       </main>
     </div>
