@@ -199,22 +199,24 @@ const App: React.FC = () => {
         nextStatus = 'reviewed';
       }
 
-      setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false } : c));
+      setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false, errorMessage: undefined } : c));
       setQuotaPause(false); 
     } catch (e: any) {
       if (e.message === 'API_KEY_MISSING') {
           alert("API Key not found. Please click the 'cog' icon and enter your Gemini API Key.");
           setView('history');
-      } else if (e.message === 'BILLING_LINK_REQUIRED') {
-          alert("Quota Exceeded.\n\nYour account is in 'Paid Tier 1', but you must ensure your API Key is created from the specific project with the billing account linked.");
+      } else if (e.message === 'BILLING_LINK_REQUIRED' || e.message === 'SEARCH_BILLING_ISSUE') {
+          const msg = e.message === 'SEARCH_BILLING_ISSUE' 
+            ? "Market Value Search failed because of a project billing restriction.\n\nACTION: If you just enabled billing, you MUST create a NEW API Key in Google AI Studio. Old keys often stay stuck on free tier limits for a few hours."
+            : "Quota Exceeded.\n\nYour project is 'Paid Tier 1', but Google is still applying free limits to this API Key.\n\nACTION: Go to AI Studio and create a NEW API Key for this project. This usually fixes the issue immediately.";
+          alert(msg);
           setQuotaPause(true); 
           setView('history');
       } else if (e.message === 'SEARCH_QUOTA_EXHAUSTED') {
-          // Specifically handle pricing/search failures separately from grading
-          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Market Value limit reached. Try searching again in 1 minute." } : c));
+          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Search Speed Limit: Try pricing again in 60s." } : c));
           setQuotaPause(true);
           setTimeout(() => setQuotaPause(false), 30000); 
-          return; // Exit early so we don't set status to grading_failed
+          return; 
       } else if (e.message === 'QUOTA_EXHAUSTED') {
           setQuotaPause(true);
           setTimeout(() => setQuotaPause(false), 30000); 
@@ -269,7 +271,7 @@ const App: React.FC = () => {
             onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value' } : c))}
             onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
             onLoadCollection={() => refreshCollection(false)} onSyncFromSheet={handleSyncFromSheet}
-            onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value' } : x))}
+            onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value', errorMessage: undefined } : x))}
             userName={user?.name || ''} 
             onResync={async () => {}} onRewriteAllAnalyses={async () => {}} resetRewriteState={() => {}}
             isRewriting={false} rewriteProgress={0} rewrittenCount={0} rewriteFailCount={0} rewriteStatusMessage={''}

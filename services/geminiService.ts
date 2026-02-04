@@ -35,13 +35,16 @@ const handleApiError = (e: any, context: string = "general") => {
     console.error(`Gemini API Error [${context}]:`, e);
     const errorStr = String(e).toLowerCase();
     
+    // Check for quota/429 specifically
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
-        // Search tool (grounding) often has its own separate tighter quota
+        // If "check your plan" or "billing" is mentioned, it's a specific type of quota error
+        const isBillingRelated = errorStr.includes("check your plan") || errorStr.includes("billing");
+        
         if (context === "market_value") {
-            throw new Error("SEARCH_QUOTA_EXHAUSTED");
+            throw new Error(isBillingRelated ? "SEARCH_BILLING_ISSUE" : "SEARCH_QUOTA_EXHAUSTED");
         }
         
-        if (errorStr.includes("check your plan") || errorStr.includes("billing")) {
+        if (isBillingRelated) {
             throw new Error("BILLING_LINK_REQUIRED");
         }
         throw new Error("QUOTA_EXHAUSTED");
@@ -71,7 +74,7 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
         if (err.includes("429") || err.includes("quota")) {
             return { 
                 success: false, 
-                message: "Quota Limit reached. Your key is valid, but you are sending requests too quickly." 
+                message: "Quota Limit reached. Your key is valid, but Google is throttling requests." 
             };
         }
         return { success: false, message: e.message || "Connection failed. Check your API key." };
@@ -131,8 +134,8 @@ export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, i
 export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
     try {
         const ai = getAI();
-        // Add a tiny random delay to avoid clashing with other simultaneous requests
-        await new Promise(r => setTimeout(r, 500 + Math.random() * 1000));
+        // Add a delay to avoid triggering rate limits after a successful grading
+        await new Promise(r => setTimeout(r, 2000));
         
         const query = `${card.year} ${card.company} ${card.set} ${card.name} ${card.cardNumber} Grade ${card.overallGrade} sold price ebay psa bgs`;
         const response = await ai.models.generateContent({
