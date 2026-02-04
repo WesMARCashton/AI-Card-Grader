@@ -40,7 +40,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
   const handleManualSave = (grade: number, gradeName: string) => {
     onManualGrade(card, grade, gradeName);
     setIsManualEntry(false);
-    onClose(); // Close main modal after kicking off the background process
+    onClose(); 
   };
 
   const handleAccept = () => {
@@ -109,16 +109,16 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <button onClick={handleAccept} className="flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition transform hover:scale-105">
+              <button onClick={handleAccept} className="flex items-center justify-center gap-2 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition transform hover:scale-105 shadow-md">
                 <CheckIcon className="w-5 h-5" /> Accept
               </button>
-              <button onClick={() => setIsChallenging(true)} className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-lg transition transform hover:scale-105">
+              <button onClick={() => setIsChallenging(true)} className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-lg transition transform hover:scale-105 shadow-sm">
                 <GavelIcon className="w-5 h-5" /> Challenge
               </button>
-              <button onClick={() => setIsManualEntry(true)} className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-lg transition transform hover:scale-105">
+              <button onClick={() => setIsManualEntry(true)} className="flex items-center justify-center gap-2 py-3 px-4 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-lg transition transform hover:scale-105 shadow-sm">
                 <EditIcon className="w-5 h-5" /> Manual
               </button>
-              <button onClick={handleRemove} className="flex items-center justify-center gap-2 py-3 px-4 bg-red-100 hover:bg-red-200 text-red-800 font-bold rounded-lg transition transform hover:scale-105">
+              <button onClick={handleRemove} className="flex items-center justify-center gap-2 py-3 px-4 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-lg transition transform hover:scale-105 shadow-sm">
                 <TrashIcon className="w-5 h-5" /> Remove
               </button>
             </div>
@@ -148,7 +148,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
           </button>
 
           <header className="text-center pt-4">
-            <h1 className="text-3xl font-bold text-slate-900">{card.name || 'Unknown Card'}</h1>
+            <h1 className="text-3xl font-bold text-slate-900">{card.name || 'Identifying...'}</h1>
             <p className="text-lg text-slate-600">{cardDescription}</p>
           </header>
 
@@ -158,7 +158,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
                   <img src={ensureDataUrl(card.frontImage)} alt="Card front" className="w-full rounded-lg shadow-md aspect-[2.5/3.5] object-contain bg-slate-100 cursor-zoom-in transition-transform hover:scale-105" onClick={() => setExpandedImage(card.frontImage)} />
                   <img src={ensureDataUrl(card.backImage)} alt="Card back" className="w-full rounded-lg shadow-md aspect-[2.5/3.5] object-contain bg-slate-100 cursor-zoom-in transition-transform hover:scale-105" onClick={() => setExpandedImage(card.backImage)} />
                 </div>
-                <div className="w-full p-4 bg-slate-100/50 rounded-lg">
+                <div className="w-full p-4 bg-slate-100/50 rounded-lg border border-slate-200">
                     <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500 text-center mb-2">Likely NGA Grade</h4>
                     {(card.overallGrade !== undefined && card.gradeName) ? (
                       <GradeDisplay grade={card.overallGrade} gradeName={card.gradeName} />
@@ -169,26 +169,26 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
 
                 {/* Market Value Section */}
                 {card.status === 'reviewed' && (
-                    <div className="w-full p-4 bg-green-50 border border-green-100 rounded-lg">
-                         <h4 className="text-sm font-semibold uppercase tracking-wider text-green-800 text-center mb-3 flex items-center justify-center gap-2">
+                    <div className="w-full p-4 bg-green-50 border border-green-200 rounded-xl shadow-sm">
+                         <h4 className="text-sm font-bold uppercase tracking-wider text-green-800 text-center mb-3 flex items-center justify-center gap-2">
                              <CurrencyIcon className="w-4 h-4" /> Market Value
                          </h4>
                          {card.marketValue ? (
                             <div className="text-center space-y-2">
-                                <p className="text-3xl font-bold text-green-700">
+                                <p className="text-4xl font-extrabold text-green-700">
                                     {card.marketValue.currency === 'USD' ? '$' : ''}{card.marketValue.averagePrice.toFixed(2)}
                                 </p>
-                                <p className="text-xs text-green-600">
+                                <p className="text-xs font-bold text-green-600">
                                     Range: {card.marketValue.minPrice} - {card.marketValue.maxPrice}
                                 </p>
-                                <p className="text-xs text-slate-500 italic">{card.marketValue.notes}</p>
+                                <p className="text-xs text-slate-500 italic px-2">{card.marketValue.notes}</p>
                                 {card.marketValue.sourceUrls.length > 0 && (
                                     <div className="pt-2 mt-2 border-t border-green-100">
-                                        <p className="text-xs font-semibold text-slate-500 mb-1">Sold Listings Found:</p>
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mb-1">Recent Sold Sources:</p>
                                         <div className="flex flex-wrap gap-2 justify-center">
                                             {card.marketValue.sourceUrls.slice(0, 3).map((url, idx) => (
-                                                <a key={idx} href={url.uri} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
-                                                    <LinkIcon className="w-3 h-3" /> Source {idx + 1}
+                                                <a key={idx} href={url.uri} target="_blank" rel="noreferrer" className="text-[11px] text-blue-600 hover:underline flex items-center gap-1 font-medium">
+                                                    <LinkIcon className="w-3 h-3" /> Link {idx + 1}
                                                 </a>
                                             ))}
                                         </div>
@@ -197,13 +197,15 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
                             </div>
                          ) : (
                              <div className="text-center">
+                                 {card.errorMessage && <p className="text-[10px] text-red-600 mb-2 font-bold uppercase">{card.errorMessage}</p>}
                                  <button 
                                     onClick={handleGetValue}
-                                    className="text-sm bg-green-600 text-white py-2 px-4 rounded-full hover:bg-green-700 transition shadow-sm font-semibold"
+                                    className="w-full text-sm bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition shadow-md font-bold flex items-center justify-center gap-2"
                                  >
-                                     Find Estimated Value
+                                     <ResyncIcon className="w-4 h-4" />
+                                     {card.errorMessage ? 'Try Price Check Again' : 'Find Estimated Value'}
                                  </button>
-                                 <p className="text-xs text-slate-500 mt-2">Checks recent sold listings on the web.</p>
+                                 <p className="text-[10px] text-slate-500 mt-2 font-medium">Verified via recent eBay/PSA sales data.</p>
                              </div>
                          )}
                     </div>
@@ -211,8 +213,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
             </div>
 
             <div className="lg:col-span-2 space-y-6">
-                <div className="p-4 bg-slate-100/50 rounded-lg">
-                  <h2 className="text-xl font-bold text-blue-600 mb-4 border-b pb-2">🏒 Card Overview</h2>
+                <div className="p-4 bg-slate-100/50 rounded-lg border border-slate-200">
+                  <h2 className="text-xl font-bold text-blue-800 mb-4 border-b pb-2 flex items-center gap-2">🏒 Card Details</h2>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                       <InfoPill label="Name" value={card.name} />
                       <InfoPill label="Team" value={card.team} />
@@ -224,15 +226,15 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
                   </div>
                 </div>
                 
-                <div className="bg-slate-100/50 rounded-lg overflow-hidden">
-                    <h2 className="text-xl font-bold text-blue-600 mb-2 p-4">🔍 NGA Evaluation Breakdown</h2>
+                <div className="bg-slate-100/50 rounded-lg overflow-hidden border border-slate-200 shadow-sm">
+                    <h2 className="text-xl font-bold text-blue-800 mb-2 p-4 bg-slate-200/30">🔍 NGA Breakdown</h2>
                     {card.details ? (
                       <table className="w-full text-left">
                           <thead className="bg-slate-200/70">
                               <tr>
-                                  <th className="py-2 px-4 text-sm font-semibold uppercase text-slate-600">Category</th>
-                                  <th className="py-2 px-4 text-sm font-semibold uppercase text-slate-600 text-center">Subgrade</th>
-                                  <th className="py-2 px-4 text-sm font-semibold uppercase text-slate-600">Notes</th>
+                                  <th className="py-2 px-4 text-xs font-bold uppercase text-slate-600">Category</th>
+                                  <th className="py-2 px-4 text-xs font-bold uppercase text-slate-600 text-center">Score</th>
+                                  <th className="py-2 px-4 text-xs font-bold uppercase text-slate-600">Grader Notes</th>
                               </tr>
                           </thead>
                           <tbody>
@@ -250,16 +252,16 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
             </div>
           </div>
           
-          <div className="p-4 bg-slate-100/50 rounded-lg">
-            <h2 className="text-xl font-bold text-blue-600 mb-3">🧭 Summary</h2>
-            <p className="text-slate-700 text-sm leading-relaxed">
-              {card.summary || 'No summary available.'}
+          <div className="p-4 bg-slate-100/50 rounded-lg border border-slate-200">
+            <h2 className="text-xl font-bold text-blue-800 mb-3 uppercase text-xs tracking-tighter">Official Grader Analysis</h2>
+            <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-line">
+              {card.summary || 'Summary is being generated...'}
             </p>
           </div>
 
           {card.status === 'grading_failed' && (
-            <div className="p-4 bg-red-50 text-red-700 rounded-lg border border-red-200">
-                <h3 className="font-bold">Grading Failed</h3>
+            <div className="p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 shadow-inner">
+                <h3 className="font-bold">Grading Limit Hit</h3>
                 <p className="text-sm">{card.errorMessage}</p>
             </div>
           )}

@@ -200,26 +200,31 @@ const App: React.FC = () => {
       }
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false } : c));
-      setQuotaPause(false); // Clear pause on success
+      setQuotaPause(false); 
     } catch (e: any) {
       if (e.message === 'API_KEY_MISSING') {
           alert("API Key not found. Please click the 'cog' icon and enter your Gemini API Key.");
           setView('history');
       } else if (e.message === 'BILLING_LINK_REQUIRED') {
-          alert("Quota Exceeded (429 Error).\n\nIMPORTANT: Even if you see 'Paid Tier 1', your API Key must be linked to that specific billing project.\n\n1. Go to aistudio.google.com/app/billing\n2. Click 'Setup Billing' on the 'NGA Card Grader' project.\n3. Verify your API Key matches that project.");
-          setQuotaPause(true); // Stop processing the rest of the queue
+          alert("Quota Exceeded.\n\nYour account is in 'Paid Tier 1', but you must ensure your API Key is created from the specific project with the billing account linked.");
+          setQuotaPause(true); 
           setView('history');
-      } else if (e.message === 'QUOTA_EXHAUSTED') {
-          // This is a temporary "you are going too fast" limit
+      } else if (e.message === 'SEARCH_QUOTA_EXHAUSTED') {
+          // Specifically handle pricing/search failures separately from grading
+          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Market Value limit reached. Try searching again in 1 minute." } : c));
           setQuotaPause(true);
-          setTimeout(() => setQuotaPause(false), 60000); // Resume in 1 minute
+          setTimeout(() => setQuotaPause(false), 30000); 
+          return; // Exit early so we don't set status to grading_failed
+      } else if (e.message === 'QUOTA_EXHAUSTED') {
+          setQuotaPause(true);
+          setTimeout(() => setQuotaPause(false), 30000); 
       }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
     } finally { processingCards.current.delete(card.id); }
   }, []);
 
   useEffect(() => {
-    if (quotaPause) return; // Don't try if we know we are paused
+    if (quotaPause) return; 
     const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
     if (queue.length > 0 && processingCards.current.size < 1) {
         queue.slice(0, 1).forEach(processCard);
@@ -274,10 +279,13 @@ const App: React.FC = () => {
         )}
       </main>
       {quotaPause && (
-        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:w-96 bg-yellow-50 border border-yellow-200 p-3 rounded-lg shadow-lg flex items-center gap-3 animate-slide-up z-50">
-           <SpinnerIcon className="w-5 h-5 text-yellow-600" />
-           <p className="text-xs text-yellow-800 font-bold">Queue Paused: Hit Google's limit. Trying again in 60s...</p>
-           <button onClick={() => setQuotaPause(false)} className="text-[10px] bg-yellow-200 hover:bg-yellow-300 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
+        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:w-96 bg-blue-900 text-white p-3 rounded-lg shadow-xl flex items-center gap-3 animate-slide-up z-50">
+           <SpinnerIcon className="w-5 h-5 text-blue-300" />
+           <div>
+             <p className="text-xs font-bold">Speed Limit Reached</p>
+             <p className="text-[10px] text-blue-200">Automatically resuming in 30s...</p>
+           </div>
+           <button onClick={() => setQuotaPause(false)} className="text-[10px] bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
         </div>
       )}
     </div>

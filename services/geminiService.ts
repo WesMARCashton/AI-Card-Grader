@@ -31,13 +31,16 @@ const getAI = () => {
     return new GoogleGenAI({ apiKey });
 };
 
-const handleApiError = (e: any) => {
-    console.error("Gemini API Error Detail:", e);
+const handleApiError = (e: any, context: string = "general") => {
+    console.error(`Gemini API Error [${context}]:`, e);
     const errorStr = String(e).toLowerCase();
     
-    // Check for quota/429 specifically
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
-        // If the message contains "check your plan", it's usually an account/billing link issue
+        // Search tool (grounding) often has its own separate tighter quota
+        if (context === "market_value") {
+            throw new Error("SEARCH_QUOTA_EXHAUSTED");
+        }
+        
         if (errorStr.includes("check your plan") || errorStr.includes("billing")) {
             throw new Error("BILLING_LINK_REQUIRED");
         }
@@ -53,9 +56,6 @@ const handleApiError = (e: any) => {
 
 const NGA_SYSTEM = `You are a professional NGA sports card grader. You are extremely strict. PSA 10s (Gem Mint) are rare. You analyze centering, corners, edges, and surface. Return your analysis in strict JSON format only.`;
 
-/**
- * Tests the current API key with a minimal request to check quota status.
- */
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
     try {
         const ai = getAI();
@@ -71,7 +71,7 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
         if (err.includes("429") || err.includes("quota")) {
             return { 
                 success: false, 
-                message: "Quota Exceeded (429). Your key is valid, but Google is limiting requests. Ensure billing is linked in AI Studio." 
+                message: "Quota Limit reached. Your key is valid, but you are sending requests too quickly." 
             };
         }
         return { success: false, message: e.message || "Connection failed. Check your API key." };
@@ -92,7 +92,7 @@ export const analyzeCardFull = async (f64: string, b64: string): Promise<any> =>
         });
         return extractJson(response);
     } catch (e) {
-        return handleApiError(e);
+        return handleApiError(e, "grading");
     }
 };
 
@@ -108,7 +108,7 @@ export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb
         });
         return extractJson(response);
     } catch (e) {
-        return handleApiError(e);
+        return handleApiError(e, "challenge");
     }
 };
 
@@ -124,13 +124,16 @@ export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, i
         });
         return extractJson(response);
     } catch (e) {
-        return handleApiError(e);
+        return handleApiError(e, "manual_rewrite");
     }
 };
 
 export const getCardMarketValue = async (card: CardData): Promise<MarketValue> => {
     try {
         const ai = getAI();
+        // Add a tiny random delay to avoid clashing with other simultaneous requests
+        await new Promise(r => setTimeout(r, 500 + Math.random() * 1000));
+        
         const query = `${card.year} ${card.company} ${card.set} ${card.name} ${card.cardNumber} Grade ${card.overallGrade} sold price ebay psa bgs`;
         const response = await ai.models.generateContent({
             model: 'gemini-3-flash-preview',
@@ -145,6 +148,6 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
         
         return { ...data, sourceUrls: sources };
     } catch (e) {
-        return handleApiError(e);
+        return handleApiError(e, "market_value");
     }
 };
