@@ -22,12 +22,16 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
     }, []);
 
     const handleSave = () => {
-        localStorage.setItem(SHEET_STORAGE_KEY, sheetUrl.trim());
-        localStorage.setItem(API_KEY_STORAGE_KEY, apiKey.trim());
+        const cleanKey = apiKey.trim();
+        const cleanUrl = sheetUrl.trim();
         
-        // Update process.env for the current session
-        if (apiKey.trim()) {
-            (process.env as any).API_KEY = apiKey.trim();
+        localStorage.setItem(SHEET_STORAGE_KEY, cleanUrl);
+        localStorage.setItem(API_KEY_STORAGE_KEY, cleanKey);
+        
+        // Immediate update for the current session's environment object
+        if (cleanKey) {
+            (process.env as any).API_KEY = cleanKey;
+            console.log("[Settings] API Key updated in session.");
         }
         
         setIsSaved(true);
@@ -43,10 +47,10 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                 await window.aistudio.openSelectKey();
             } catch (e) {
                 console.error("AI Studio key selection failed:", e);
-                alert("Failed to open key selection. Please use manual entry.");
+                alert("Failed to open key selection. Please use manual entry below.");
             }
         } else {
-            alert("External key selection is not available in this environment. Please enter your key manually below.");
+            alert("System key picker is not available in this host. Please paste your API key in the 'Manual Entry' box.");
         }
     };
 
@@ -64,13 +68,13 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                         <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-2">
                             <KeyIcon className="w-4 h-4" /> Grader API Connection
                         </h3>
-                        <p className="text-xs text-blue-700 mb-4">
-                            A Gemini API key from a paid project is required for the AI Grader to function.
+                        <p className="text-[11px] text-blue-700 mb-4">
+                            A Gemini API key from a paid Google Cloud project is required for grading.
                         </p>
                         
                         <div className="space-y-3">
                             <div>
-                                <label htmlFor="manual-api-key" className="block text-xs font-medium text-slate-700 mb-1">Enter API Key Manually</label>
+                                <label htmlFor="manual-api-key" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Enter API Key Manually</label>
                                 <input
                                     type="password"
                                     id="manual-api-key"
@@ -81,9 +85,9 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                                 />
                             </div>
                             
-                            <div className="relative flex py-2 items-center">
+                            <div className="relative flex py-1 items-center">
                                 <div className="flex-grow border-t border-blue-200"></div>
-                                <span className="flex-shrink mx-4 text-[10px] text-blue-400 font-bold">OR</span>
+                                <span className="flex-shrink mx-4 text-[9px] text-blue-400 font-bold">OR</span>
                                 <div className="flex-grow border-t border-blue-200"></div>
                             </div>
 
@@ -91,7 +95,7 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                                 onClick={handleManageApiKey}
                                 className="w-full py-2 px-4 bg-white border border-blue-200 hover:bg-blue-50 text-blue-600 text-xs font-bold rounded-md transition flex items-center justify-center gap-2"
                             >
-                                <KeyIcon className="w-3 h-3" /> Use System Key Picker
+                                <KeyIcon className="w-3 h-3" /> Select via AI Studio
                             </button>
                         </div>
                         
@@ -116,7 +120,7 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                             placeholder="https://docs.google.com/spreadsheets/d/..."
                             className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                         />
-                        <p className="text-[10px] text-slate-500 mt-2">The spreadsheet where your collection data will be synced.</p>
+                        <p className="text-[10px] text-slate-500 mt-2">Where your collection data will be exported.</p>
                     </div>
 
                     <div className="flex justify-end gap-3 pt-2">

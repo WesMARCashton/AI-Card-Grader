@@ -1,159 +1,92 @@
+
 import { CardData } from '../types';
 
 const DRIVE_API_URL = 'https://www.googleapis.com/drive/v3';
 const UPLOAD_API_URL = 'https://www.googleapis.com/upload/drive/v3';
 const FILE_NAME = 'card_collection.json';
 
-// Helper to find the file in appDataFolder (recovers if it was trashed)
 const findFileId = async (accessToken: string): Promise<string | null> => {
-      const base = `${DRIVE_API_URL}/files?spaces=appDataFolder&fields=files(id,name,trashed)`;
+  // Search both the main drive and the app-specific data folder
+  const q = `name='${FILE_NAME}' and trashed=false`;
+  const url = `${DRIVE_API_URL}/files?spaces=drive,appDataFolder&fields=files(id,name,modifiedTime)&q=${encodeURIComponent(q)}&orderBy=modifiedTime desc&pageSize=10`;
 
-      // 1) Try non-trashed first
-      const q1 = encodeURIComponent(`name='${FILE_NAME}' and trashed=false`);
-      let response = await fetch(`${base}&q=${q1}`, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-
-      if (!response.ok) {
-              const error = await response.json().catch(() => ({}));
-              console.error("Drive API findFileId error:", error);
-              const message = (error as any)?.error?.message || 'Failed to search for collection file.';
-              throw new Error(message);
-      }
-
-      let data = await response.json();
-      if (data.files && data.files.length > 0) return data.files[0].id;
-
-      // 2) If not found, try INCLUDING trashed
-      const q2 = encodeURIComponent(`name='${FILE_NAME}'`);
-      response = await fetch(`${base}&q=${q2}`, {
-              headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-
-      if (!response.ok) {
-              const error = await response.json().catch(() => ({}));
-              console.error("Drive API findFileId (trashed check) error:", error);
-              return null;
-      }
-
-      data = await response.json();
-      if (!data.files || data.files.length === 0) return null;
-
-      const file = data.files[0];
-
-      // 3) If it exists but is trashed, untrash it
-      if (file.trashed) {
-              const untrashResp = await fetch(`${DRIVE_API_URL}/files/${file.id}`, {
-                        method: 'PATCH',
-                        headers: {
-                                    'Authorization': `Bearer ${accessToken}`,
-                                    'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ trashed: false })
-              });
-
-        if (!untrashResp.ok) {
-                  const err = await untrashResp.json().catch(() => ({}));
-                  console.error("Drive API untrash error:", err);
-                  // Even if untrash fails, return id so user can try manually later
-        }
-      }
-
-      return file.id;
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+        console.error('[DriveService] Find query failed:', response.status);
+        return null;
+    }
+    const data = await response.json();
+    if (data.files && data.files.length > 0) {
+        console.log('[DriveService] Found collection candidates:', data.files);
+        return data.files[0].id;
+    }
+    return null;
+  } catch (e) {
+    console.error('[DriveService] Error searching Drive:', e);
+    return null;
+  }
 };
 
-export const listCollectionsFromDrive = async (accessToken: string): Promise<CardData[]> => {
-      try {
-              const fileId = await findFileId(accessToken);
-              if (!fileId) {
-                        throw new Error('Collection file not found in Drive.');
-              }
+export const getCollection = async (
+  accessToken: string
+): Promise<{ fileId: string | null; cards: CardData[] }> => {
+  const fileId = await findFileId(accessToken);
+  if (!fileId) {
+    return { fileId: null, cards: [] };
+  }
 
-        const response = await fetch(
-                  `${DRIVE_API_URL}/files/${fileId}?alt=media`,
-            {
-                        headers: { 'Authorization': `Bearer ${accessToken}` }
-            }
-                );
-
-        if (!response.ok) {
-                  const error = await response.json().catch(() => ({}));
-                  console.error("Drive API download error:", error);
-                  const message = (error as any)?.error?.message || 'Failed to download collection file.';
-                  throw new Error(message);
-        }
-
-        const data = await response.json();
-              return data.cards && Array.isArray(data.cards) ? data.cards : [];
-      } catch (error) {
-              throw new Error(error instanceof Error ? error.message : 'Failed to load collection from Drive.');
-      }
+  try {
+    const response = await fetch(`${DRIVE_API_URL}/files/${fileId}?alt=media`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+        console.error('[DriveService] Media download failed:', response.status);
+        return { fileId, cards: [] };
+    }
+    const cards = await response.json();
+    return { fileId, cards: Array.isArray(cards) ? cards : [] };
+  } catch (e) {
+    console.error('[DriveService] Error downloading collection:', e);
+    return { fileId, cards: [] };
+  }
 };
 
-export const saveCollectionToDrive = async (
-      accessToken: string,
-      cards: CardData[]
-    ): Promise<void> => {
-      try {
+export const saveCollection = async (
+  accessToken: string,
+  fileId: string | null,
+  cards: CardData[]
+): Promise<string> => {
+  const metadata: { name: string; mimeType: string; parents?: string[] } = {
+    name: FILE_NAME,
+    mimeType: 'application/json',
+  };
 
-                // SAFETY: never overwrite Drive with an empty collection
-                if (!cards || cards.length === 0) {
-                            console.warn('[Drive] Refusing to save empty card collection');
-                 return;           
-                }
-            
-              const fileId = await findFileId(accessToken);
-              const fileData = { cards };
-              const jsonContent = JSON.stringify(fileData);
+  // Default to AppDataFolder for privacy, but keep existing location if updating
+  if (!fileId) metadata.parents = ['appDataFolder'];
 
-        if (fileId) {
-                  // File exists, update it
-                const response = await fetch(
-                            `${UPLOAD_API_URL}/files/${fileId}?uploadType=media`,
-                    {
-                                  method: 'PATCH',
-                                  headers: {
-                                                  'Authorization': `Bearer ${accessToken}`,
-                                                  'Content-Type': 'application/json'
-                                  },
-                                  body: jsonContent
-                    }
-                          );
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', new Blob([JSON.stringify(cards)], { type: 'application/json' }));
 
-                if (!response.ok) {
-                            const error = await response.json().catch(() => ({}));
-                            console.error("Drive API PATCH error:", error);
-                            throw new Error((error as any)?.error?.message || 'Failed to update collection file.');
-                }
-        } else {
-                  // File doesn't exist, create it
-                const metadata = {
-                            name: FILE_NAME,
-                            parents: ['appDataFolder']
-                };
+  const url = fileId
+    ? `${UPLOAD_API_URL}/files/${fileId}?uploadType=multipart`
+    : `${UPLOAD_API_URL}/files?uploadType=multipart`;
 
-                const formData = new FormData();
-                  formData.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-                  formData.append('file', new Blob([jsonContent], { type: 'application/json' }));
+  const response = await fetch(url, {
+    method: fileId ? 'PATCH' : 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
 
-                const response = await fetch(
-                            `${UPLOAD_API_URL}/files?uploadType=multipart`,
-                    {
-                                  method: 'POST',
-                                  headers: {
-                                                  'Authorization': `Bearer ${accessToken}`
-                                  },
-                                  body: formData
-                    }
-                          );
-
-                if (!response.ok) {
-                            const error = await response.json().catch(() => ({}));
-                            console.error("Drive API POST error:", error);
-                            throw new Error((error as any)?.error?.message || 'Failed to create collection file.');
-                }
-        }
-      } catch (error) {
-              throw new Error(error instanceof Error ? error.message : 'Failed to save collection to Drive.');
-      }
+  if (!response.ok) {
+      const errText = await response.text();
+      console.error('[DriveService] Save failed:', errText);
+      throw new Error('Failed to save collection to Google Drive.');
+  }
+  
+  const data = await response.json();
+  return data.id;
 };

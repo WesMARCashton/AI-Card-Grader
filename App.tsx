@@ -76,47 +76,47 @@ const App: React.FC = () => {
     const addToMapRecursive = (data: any) => {
         if (!data) return;
         
-        // Is this a card?
-        if (typeof data === 'object' && data.frontImage && (data.id || data.name)) {
-            const key = data.id || `${data.name}-${data.timestamp}`;
-            if (!recoveredMap.has(key)) {
-                recoveredMap.set(key, data);
+        // Is this a card object?
+        if (typeof data === 'object' && !Array.isArray(data)) {
+            // Check for card signatures
+            if (data.frontImage && (data.id || data.name || data.overallGrade !== undefined)) {
+                const key = data.id || `${data.name}-${data.timestamp || Date.now()}`;
+                if (!recoveredMap.has(key)) {
+                    recoveredMap.set(key, data);
+                    return;
+                }
             }
-            return;
-        }
-
-        // Is this an array? Check items
-        if (Array.isArray(data)) {
-            data.forEach(item => addToMapRecursive(item));
-            return;
-        }
-
-        // Is this an object? Search its properties
-        if (typeof data === 'object') {
+            
+            // Search its properties
             Object.values(data).forEach(val => {
                 if (val && typeof val === 'object') {
                     addToMapRecursive(val);
                 }
             });
+        } else if (Array.isArray(data)) {
+            data.forEach(item => addToMapRecursive(item));
         }
     };
 
-    // Global Sweep
+    // Global Sweep: Check every single key in localStorage
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key) {
         try {
           const val = localStorage.getItem(key);
-          if (val && (val.includes('frontImage') || val.includes('overallGrade') || val.includes('card_collection'))) {
-            const parsed = JSON.parse(val);
-            addToMapRecursive(parsed);
+          if (val && val.startsWith('[') || val.startsWith('{')) {
+             // Heuristic: If it looks like JSON and contains card data hints
+             if (val.includes('frontImage') || val.includes('overallGrade') || val.includes('backImage')) {
+                 const parsed = JSON.parse(val);
+                 addToMapRecursive(parsed);
+             }
           }
         } catch(e) {}
       }
     }
     
     const finalCards = Array.from(recoveredMap.values());
-    console.log(`[App] Initialized with ${finalCards.length} recovered cards.`);
+    console.log(`[App] Total cards recovered/loaded: ${finalCards.length}`);
     return normalizeCards(finalCards);
   });
 
@@ -140,34 +140,32 @@ const App: React.FC = () => {
           const remoteCards = normalizeCards(remoteData);
           setCards(prev => {
             const merged = [...prev];
-            let added = 0;
+            let addedCount = 0;
             remoteCards.forEach(rc => {
               const exists = merged.find(m => m.id === rc.id || (m.name === rc.name && m.frontImage === rc.frontImage));
               if (!exists) { 
                   merged.push(rc); 
-                  added++; 
+                  addedCount++; 
               } else { 
                 const idx = merged.indexOf(exists);
                 merged[idx] = { ...exists, ...rc };
               }
             });
             if (!silent) {
-              if (added > 0) alert(`Success! Recovered ${added} new cards from your Google Drive.`);
-              else alert("Your collection is already up to date.");
+              if (addedCount > 0) alert(`Drive Sync Complete: Found ${addedCount} new cards!`);
+              else alert("Your collection is up to date.");
             }
             return merged.sort((a, b) => b.timestamp - a.timestamp);
           });
       } else if (!silent) {
-          alert("No collection data found on Google Drive for this account.\n\nNote: If you used a different Google account or an older version of this app, your data might be stored elsewhere.");
+          alert("We couldn't find a collection file on this Google Drive account. Try logging in with the account you used previously.");
       }
       
       setDriveFileId(fileId);
       setSyncStatus('success');
-    } catc} catch (e: any) {
-          setSyncStatus('error');
-          const errorMsg = e?.message || 'Unknown error occurred';
-          console.error('Full sync error:', e);
-          if (!silent) alert(`Sync failed: ${errorMsg}`);
+    } catch (e) {
+      setSyncStatus('error');
+      if (!silent) alert("Connection to Google Drive failed. Please try again.");
     }
   }, [user, getAccessToken]);
 
@@ -178,7 +176,7 @@ const App: React.FC = () => {
   const handleSyncFromSheet = useCallback(async () => {
     if (!user || !getAccessToken) return;
     const url = localStorage.getItem(SHEET_URL_STORAGE);
-    if (!url) { alert("Please set your Google Sheet URL in settings."); return; }
+    if (!url) { alert("Configure your Google Sheet URL in settings first."); return; }
     try {
       const token = await getAccessToken();
       const sheetCards = await fetchCardsFromSheet(token, url);
@@ -221,7 +219,7 @@ const App: React.FC = () => {
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false } : c));
     } catch (e: any) {
       if (e.message === 'API_KEY_MISSING') {
-          alert("Grader API Key is required. Please open settings (cog icon) and enter your key.");
+          alert("API Key not found. Please click the 'cog' icon and enter your Gemini API Key.");
           setView('history');
       }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
@@ -230,8 +228,8 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
-    if (queue.length > 0 && processingCards.current.size < 2) {
-        queue.slice(0, 2 - processingCards.current.size).forEach(processCard);
+    if (queue.length > 0 && processingCards.current.size < 1) {
+        queue.slice(0, 1).forEach(processCard);
     }
   }, [cards, processCard]);
 
@@ -246,7 +244,7 @@ const App: React.FC = () => {
           lastSavedRef.current = str;
         } catch(e) {}
       }
-    }, 30000);
+    }, 60000); // Auto-save every minute
     return () => clearTimeout(timer);
   }, [cards, user, getAccessToken, driveFileId]);
 
