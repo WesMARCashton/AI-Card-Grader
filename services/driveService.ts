@@ -27,8 +27,9 @@ const findFileId = async (accessToken: string): Promise<string | null> => {
         headers: { 'Authorization': `Bearer ${accessToken}` }
     });
     if (!driveResponse.ok) {
-        return null; // Fail silently on fallback
-    }
+      const error = await driveResponse.json();
+          console.error("Drive API fallback search error:", error);
+          throw new Error(`Drive API fallback search failed: ${error?.error?.message || 'Unknown error'}`);}
     const driveResult = await driveResponse.json();
     return driveResult.files.length > 0 ? driveResult.files[0].id : null;
 };
@@ -51,7 +52,7 @@ export const getCollection = async (accessToken: string): Promise<{ fileId: stri
             const error = await response.json();
             console.error("Drive API getCollection error:", error);
             const message = error?.error?.message || 'Failed to download collection file.';
-            throw new Error(message);
+            throw new Error(message);h
         } catch(e) {
             console.error("Drive API getCollection error (non-JSON):", await response.text());
             throw new Error('Failed to download collection file.');
