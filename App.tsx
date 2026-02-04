@@ -67,6 +67,7 @@ const App: React.FC = () => {
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   const [view, setView] = useState<AppView>('scanner');
   const [quotaPause, setQuotaPause] = useState(false);
+  const [quotaTimer, setQuotaTimer] = useState(0);
   
   const [cards, setCards] = useState<CardData[]>(() => {
     const recoveredMap = new Map<string, any>();
@@ -114,7 +115,7 @@ const App: React.FC = () => {
     try {
       localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
     } catch (e) {
-      console.warn("LocalStorage quota exceeded. New cards may not be saved locally, but will be synced to Drive.", e);
+      console.warn("LocalStorage quota exceeded.", e);
     }
   }, [cards]);
 
@@ -171,12 +172,21 @@ const App: React.FC = () => {
 
   const processCard = useCallback(async (card: CardData) => {
     if (processingCards.current.has(card.id)) return;
+    
+    console.log(`[Queue] Starting process for card: ${card.id} (${card.status})`);
     processingCards.current.add(card.id);
+
+    // Safety timeout: 60 seconds
+    const safetyTimeout = setTimeout(() => {
+        if (processingCards.current.has(card.id)) {
+            console.error(`[Queue] Timeout reached for card ${card.id}. Unblocking queue.`);
+            processingCards.current.delete(card.id);
+            setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: "Request timed out. Please try again." } : c));
+        }
+    }, 65000);
+
     try {
-      // Defense against missing images
-      if (!card.frontImage || !card.backImage) {
-        throw new Error("Missing card images for analysis.");
-      }
+      if (!card.frontImage || !card.backImage) throw new Error("Missing images.");
 
       const f64 = dataUrlToBase64(card.frontImage);
       const b64 = dataUrlToBase64(card.backImage);
@@ -197,20 +207,33 @@ const App: React.FC = () => {
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false, errorMessage: undefined } : c));
       setQuotaPause(false); 
+      console.log(`[Queue] Successfully processed card: ${card.id}`);
     } catch (e: any) {
+      console.error(`[Queue] Error processing card ${card.id}:`, e);
       if (e.message === 'SEARCH_BILLING_ISSUE' || e.message === 'BILLING_LINK_REQUIRED') {
-          // If pricing specifically fails due to billing, mark card as reviewed but note the error
-          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Price Search restricted. Billing or Fresh API Key required." } : c));
+          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Pricing Restricted. Needs billing setup." } : c));
           setQuotaPause(true);
-          setView('history');
+          setQuotaTimer(30);
           return;
       } else if (e.message === 'SEARCH_QUOTA_EXHAUSTED' || e.message === 'QUOTA_EXHAUSTED') {
           setQuotaPause(true);
-          setTimeout(() => setQuotaPause(false), 30000); 
+          setQuotaTimer(30);
       }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
-    } finally { processingCards.current.delete(card.id); }
+    } finally { 
+      clearTimeout(safetyTimeout);
+      processingCards.current.delete(card.id); 
+    }
   }, []);
+
+  useEffect(() => {
+    if (quotaPause && quotaTimer > 0) {
+        const t = setTimeout(() => setQuotaTimer(q => q - 1), 1000);
+        return () => clearTimeout(t);
+    } else if (quotaPause && quotaTimer === 0) {
+        setQuotaPause(false);
+    }
+  }, [quotaPause, quotaTimer]);
 
   useEffect(() => {
     if (quotaPause) return; 
@@ -271,10 +294,10 @@ const App: React.FC = () => {
         <div className="fixed bottom-4 left-4 right-4 md:left-auto md:w-96 bg-blue-900 text-white p-3 rounded-lg shadow-xl flex items-center gap-3 animate-slide-up z-50">
            <SpinnerIcon className="w-5 h-5 text-blue-300" />
            <div>
-             <p className="text-xs font-bold">Speed Limit Reached</p>
-             <p className="text-[10px] text-blue-200">Automatically resuming in 30s...</p>
+             <p className="text-xs font-bold">Throttling Requests</p>
+             <p className="text-[10px] text-blue-200">Rate limit protection active. Resuming in {quotaTimer}s...</p>
            </div>
-           <button onClick={() => setQuotaPause(false)} className="text-[10px] bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
+           <button onClick={() => {setQuotaPause(false); setQuotaTimer(0);}} className="text-[10px] bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
         </div>
       )}
     </div>
