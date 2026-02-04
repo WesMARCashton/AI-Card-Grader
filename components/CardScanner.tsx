@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useCallback, ChangeEvent, useEffect } from 'react';
 import { useCamera } from '../hooks/useCamera';
-import { fileToDataUrl } from '../utils/fileUtils';
+import { fileToDataUrl, optimizeImageForGemini } from '../utils/fileUtils';
 import { CameraIcon, UploadIcon, SpinnerIcon, CheckIcon, ResyncIcon } from './icons';
 
 interface CardScannerProps {
@@ -28,6 +28,7 @@ export const CardScanner: React.FC<CardScannerProps> = ({
 }) => {
   const [frontImage, setFrontImage] = useState<string | null>(null);
   const [backImage, setBackImage] = useState<string | null>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode>('upload');
   const [cameraTarget, setCameraTarget] = useState<TargetSide>('front');
   const [confirmation, setConfirmation] = useState('');
@@ -49,25 +50,41 @@ export const CardScanner: React.FC<CardScannerProps> = ({
 
   const handleFileChange = async (e: ChangeEvent<HTMLInputElement>, side: TargetSide) => {
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const dataUrl = await fileToDataUrl(file);
-      if (side === 'front') {
-        setFrontImage(dataUrl);
-      } else {
-        setBackImage(dataUrl);
+      setIsOptimizing(true);
+      try {
+        const file = e.target.files[0];
+        const rawDataUrl = await fileToDataUrl(file);
+        const optimized = await optimizeImageForGemini(rawDataUrl);
+        if (side === 'front') {
+          setFrontImage(optimized);
+        } else {
+          setBackImage(optimized);
+        }
+      } catch (err) {
+        console.error("Image optimization failed:", err);
+      } finally {
+        setIsOptimizing(false);
       }
     }
   };
 
-  const handleCapture = () => {
+  const handleCapture = async () => {
     const photoDataUrl = capturePhoto();
     if (photoDataUrl) {
-      if (cameraTarget === 'front') {
-        setFrontImage(photoDataUrl);
-        setCameraTarget('back');
-      } else {
-        setBackImage(photoDataUrl);
-        stopCamera();
+      setIsOptimizing(true);
+      try {
+        const optimized = await optimizeImageForGemini(photoDataUrl);
+        if (cameraTarget === 'front') {
+          setFrontImage(optimized);
+          setCameraTarget('back');
+        } else {
+          setBackImage(optimized);
+          stopCamera();
+        }
+      } catch (err) {
+        console.error("Capture optimization failed:", err);
+      } finally {
+        setIsOptimizing(false);
       }
     }
   };
@@ -95,7 +112,7 @@ export const CardScanner: React.FC<CardScannerProps> = ({
   const renderImageSlot = (side: TargetSide, image: string | null, fileRef: React.RefObject<HTMLInputElement>) => (
     <div 
       className="relative w-full aspect-[2.5/3.5] bg-slate-100/80 border-2 border-dashed border-slate-400 rounded-lg flex flex-col justify-center items-center text-slate-500 cursor-pointer hover:border-blue-500 hover:bg-slate-200/80 transition-all duration-300 group"
-      onClick={() => fileRef.current?.click()}
+      onClick={() => !isOptimizing && fileRef.current?.click()}
     >
       {image ? (
         <img src={image} alt={`${side} of card`} className="absolute inset-0 w-full h-full object-contain rounded-lg" />
@@ -130,6 +147,13 @@ export const CardScanner: React.FC<CardScannerProps> = ({
         {renderImageSlot('back', backImage, fileInputBackRef)}
       </div>
 
+      {isOptimizing && (
+        <div className="flex items-center justify-center gap-2 py-2 text-blue-600 font-bold animate-pulse">
+          <SpinnerIcon className="w-4 h-4" />
+          <span className="text-xs uppercase tracking-widest">Optimizing Image...</span>
+        </div>
+      )}
+
       {!stream && (
         <button
           onClick={handleStartCamera}
@@ -149,8 +173,12 @@ export const CardScanner: React.FC<CardScannerProps> = ({
             {cameraError && <p className="text-red-500 text-center text-sm">{cameraError}</p>}
             <p className="text-center font-bold text-blue-600 animate-pulse">Position {cameraTarget} of card</p>
             <div className="flex gap-4">
-                <button onClick={handleCapture} className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg">
-                    Capture {cameraTarget}
+                <button 
+                    onClick={handleCapture} 
+                    disabled={isOptimizing}
+                    className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg disabled:opacity-50"
+                >
+                    {isOptimizing ? 'Resizing...' : `Capture ${cameraTarget}`}
                 </button>
                 <button onClick={handleSwitchToUpload} className="py-3 px-4 bg-slate-500 hover:bg-slate-600 text-white font-bold rounded-lg shadow-md">
                     Cancel
@@ -169,7 +197,7 @@ export const CardScanner: React.FC<CardScannerProps> = ({
         
         <button
           onClick={handleGetRating}
-          disabled={!frontImage || !backImage || isGrading}
+          disabled={!frontImage || !backImage || isGrading || isOptimizing}
           className="w-full py-4 px-4 bg-gradient-to-r from-[#3e85c7] to-[#ffcb05] text-white text-lg font-bold rounded-lg shadow-lg transition-all transform hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex items-center justify-center gap-3"
         >
           {isGrading ? (

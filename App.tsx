@@ -111,7 +111,11 @@ const App: React.FC = () => {
   const lastSavedRef = useRef('');
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
+    try {
+      localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
+    } catch (e) {
+      console.warn("LocalStorage quota exceeded. New cards may not be saved locally, but will be synced to Drive.", e);
+    }
   }, [cards]);
 
   const refreshCollection = useCallback(async (silent: boolean = false) => {
@@ -169,6 +173,11 @@ const App: React.FC = () => {
     if (processingCards.current.has(card.id)) return;
     processingCards.current.add(card.id);
     try {
+      // Defense against missing images
+      if (!card.frontImage || !card.backImage) {
+        throw new Error("Missing card images for analysis.");
+      }
+
       const f64 = dataUrlToBase64(card.frontImage);
       const b64 = dataUrlToBase64(card.backImage);
       let updates: Partial<CardData> = {};
