@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckIcon } from './icons';
+import { CheckIcon, KeyIcon } from './icons';
 
 interface SheetSettingsModalProps {
     onClose: () => void;
@@ -26,15 +26,48 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
         }, 1000);
     };
 
+    const handleManageApiKey = async () => {
+        if (window.aistudio) {
+            await window.aistudio.openSelectKey();
+        } else {
+            alert("API Key management is only available in the AI Studio environment.");
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4 animate-fade-in" onClick={onClose}>
             <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold text-slate-800">Google Sheets Settings</h2>
+                    <h2 className="text-xl font-bold text-slate-800">App Settings</h2>
                     <button onClick={onClose} className="text-slate-500 hover:text-slate-800 text-2xl">&times;</button>
                 </div>
 
                 <div className="space-y-6">
+                    {/* API Key Section */}
+                    <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
+                        <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-2">
+                            <KeyIcon className="w-4 h-4" /> Grader API Connection
+                        </h3>
+                        <p className="text-xs text-blue-700 mb-4">
+                            To use the AI Grader, you must link an API key from a paid Google Cloud project.
+                        </p>
+                        <button 
+                            onClick={handleManageApiKey}
+                            className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-md shadow-sm transition"
+                        >
+                            Select / Update API Key
+                        </button>
+                        <a 
+                            href="https://ai.google.dev/gemini-api/docs/billing" 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="block text-[10px] text-blue-500 hover:underline mt-2 text-center"
+                        >
+                            Learn more about Gemini API billing
+                        </a>
+                    </div>
+
+                    {/* Google Sheet Section */}
                     <div>
                         <label htmlFor="settings-sheet-url" className="block text-sm font-medium text-slate-700 mb-1">Google Sheet URL</label>
                         <input

@@ -18,7 +18,6 @@ import { dataUrlToBase64 } from './utils/fileUtils';
 
 const SHEET_URL_STORAGE = 'google_sheet_url';
 const LOCAL_CARDS_STORAGE = 'nga_card_collection_local';
-const LEGACY_KEYS = ['card_collection', 'cards', 'nga_cards', 'nga_card_collection', 'collection_data'];
 
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -41,6 +40,7 @@ const normalizeCards = (data: any[]): CardData[] => {
 };
 
 const App: React.FC = () => {
+  // Auto-resize for iframe hosting
   useEffect(() => {
     const PARENT_ORIGIN = "https://ngacard.com";
     const sendHeight = () => {
@@ -58,34 +58,52 @@ const App: React.FC = () => {
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   const [view, setView] = useState<AppView>('scanner');
   
+  // Exhaustive Data Recovery: Scans EVERYTHING in local storage
   const [cards, setCards] = useState<CardData[]>(() => {
-    let initial = [];
-    const saved = localStorage.getItem(LOCAL_CARDS_STORAGE);
-    if (saved) try { initial = JSON.parse(saved); } catch(e) {}
+    let recovered: any[] = [];
     
-    // Recovery Sweep
-    LEGACY_KEYS.forEach(key => {
-      const legacy = localStorage.getItem(key);
-      if (legacy) {
+    // 1. Try primary storage
+    const primary = localStorage.getItem(LOCAL_CARDS_STORAGE);
+    if (primary) try { recovered = JSON.parse(primary); } catch(e) {}
+
+    // 2. Global Sweep: Look at every key for potential card arrays
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key !== LOCAL_CARDS_STORAGE) {
         try {
-          const parsed = JSON.parse(legacy);
-          if (Array.isArray(parsed)) {
-            parsed.forEach(pc => {
-              if (!initial.find((ic: any) => ic.id === pc.id || (ic.name === pc.name && ic.timestamp === pc.timestamp))) {
-                initial.push(pc);
-              }
-            });
+          const val = localStorage.getItem(key);
+          if (val && (val.includes('frontImage') || val.includes('overallGrade'))) {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed)) {
+              parsed.forEach(pCard => {
+                // Deduplicate by name and timestamp
+                const isDupe = recovered.find(rc => rc.id === pCard.id || (rc.name === pCard.name && Math.abs(rc.timestamp - pCard.timestamp) < 5000));
+                if (!isDupe) recovered.push(pCard);
+              });
+            }
           }
         } catch(e) {}
       }
-    });
-    return normalizeCards(initial);
+    }
+    return normalizeCards(recovered);
   });
 
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const processingCards = useRef(new Set<string>());
   const lastSavedRef = useRef('');
+
+  // API Key Selection logic
+  useEffect(() => {
+    const checkApiKey = async () => {
+      if (window.aistudio && !(await window.aistudio.hasSelectedApiKey())) {
+        // We don't force it here to avoid annoying popups, 
+        // but we ensure the mechanism is available in settings.
+        console.log("No API key selected in AI Studio context.");
+      }
+    };
+    checkApiKey();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(LOCAL_CARDS_STORAGE, JSON.stringify(cards));
@@ -110,16 +128,18 @@ const App: React.FC = () => {
             merged[idx] = { ...exists, ...rc };
           }
         });
-        if (!silent && added > 0) alert(`Found ${added} cards in your Drive!`);
-        else if (!silent && remoteCards.length > 0) alert("Collection is up to date.");
-        else if (!silent) alert("No collection files found in this Drive account.");
+        if (!silent) {
+          if (added > 0) alert(`Success! Recovered ${added} cards from Google Drive.`);
+          else if (remoteCards.length > 0) alert("Collection is already up to date.");
+          else alert("No collection files were found in this Drive account.");
+        }
         return merged.sort((a, b) => b.timestamp - a.timestamp);
       });
       setDriveFileId(fileId);
       setSyncStatus('success');
     } catch (e) {
       setSyncStatus('error');
-      if (!silent) alert("Sync failed. Check connection.");
+      if (!silent) alert("Sync failed. Please check your internet connection.");
     }
   }, [user, getAccessToken]);
 
@@ -130,20 +150,22 @@ const App: React.FC = () => {
   const handleSyncFromSheet = useCallback(async () => {
     if (!user || !getAccessToken) return;
     const url = localStorage.getItem(SHEET_URL_STORAGE);
-    if (!url) { alert("Set Sheet URL in settings."); return; }
+    if (!url) { alert("Please set your Google Sheet URL in settings."); return; }
     try {
       const token = await getAccessToken();
       const sheetCards = await fetchCardsFromSheet(token, url);
       setCards(prev => {
         const merged = [...prev];
+        let added = 0;
         sheetCards.forEach(sc => {
           if (!merged.find(m => m.id === sc.id || (m.name === sc.name && m.year === sc.year))) {
             merged.push(sc);
+            added++;
           }
         });
+        if (added > 0) alert(`Imported ${added} new records from sheet.`);
         return merged.sort((a, b) => b.timestamp - a.timestamp);
       });
-      alert(`Imported ${sheetCards.length} cards.`);
     } catch (e: any) { alert("Sheet sync failed: " + e.message); }
   }, [user, getAccessToken]);
 
@@ -170,6 +192,9 @@ const App: React.FC = () => {
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false } : c));
     } catch (e: any) {
+      if (e.message === 'API_KEY_MISSING' && window.aistudio) {
+          window.aistudio.openSelectKey();
+      }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
     } finally { processingCards.current.delete(card.id); }
   }, []);
