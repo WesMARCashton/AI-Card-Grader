@@ -15,7 +15,7 @@ interface CardHistoryProps {
   onCardsSynced: (syncedCards: CardData[]) => void;
   onChallengeGrade: (card: CardData, direction: 'higher' | 'lower') => void;
   onResync: (card: CardData) => Promise<void>;
-  onRetryGrading: (card: CardData) => void; 
+  onRetryGrading: (card: CardData) => void;
   onRewriteAllAnalyses: () => Promise<void>;
   resetRewriteState: () => void;
   isRewriting: boolean;
@@ -25,27 +25,31 @@ interface CardHistoryProps {
   rewriteStatusMessage: string;
   onAcceptGrade: (cardId: string) => void;
   onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
-  onLoadCollection?: () => void;
-  onGetMarketValue: (card: CardData) => void; 
+  onLoadCollection?: () => void | Promise<void>; // allow async
+  onSyncFromSheet?: () => Promise<void>;
+  onGetMarketValue: (card: CardData) => void;
   userName: string;
 }
 
 const CardRow: React.FC<{ card: CardData; onSelect: () => void; onDelete: () => void; }> = ({ card, onSelect, onDelete }) => {
-  const isBlocking = ['grading', 'challenging', 'regenerating_summary'].includes(card.status);
-  
+  const isBlocking = ['grading', 'challenging', 'regenerating_summary', 'generating_summary'].includes(card.status);
+
   const getStatusIndicator = () => {
     switch (card.status) {
-        case 'grading': return <div className="text-sm font-semibold text-blue-600">Grading...</div>;
-        case 'challenging': return <div className="text-sm font-semibold text-yellow-600">Challenging...</div>;
-        case 'needs_review': return <div className="text-sm font-bold text-green-600">Review Now</div>;
-        case 'grading_failed': return <div className="text-sm font-semibold text-red-600">Failed</div>;
-        case 'fetching_value': return <div className="text-sm font-semibold text-green-600 animate-pulse">Pricing...</div>;
-        default: return <p className="text-sm font-semibold text-slate-600">{card.gradeName || 'Grades'}</p>;
+      case 'grading': return <div className="text-sm font-semibold text-blue-600">Grading...</div>;
+      case 'challenging': return <div className="text-sm font-semibold text-yellow-600">Challenging...</div>;
+      case 'needs_review': return <div className="text-sm font-bold text-green-600">Review Now</div>;
+      case 'grading_failed': return <div className="text-sm font-semibold text-red-600">Failed</div>;
+      case 'fetching_value': return <div className="text-sm font-semibold text-green-600 animate-pulse">Pricing...</div>;
+      case 'generating_summary':
+      case 'regenerating_summary':
+        return <div className="text-sm font-semibold text-indigo-600 animate-pulse">Analyzing...</div>;
+      default: return <p className="text-sm font-semibold text-slate-600">{card.gradeName || 'Grades'}</p>;
     }
   };
 
   return (
-    <div 
+    <div
       className={`bg-white p-4 rounded-lg flex items-center gap-4 shadow-lg transition-all duration-300 ${isBlocking ? 'opacity-70 pointer-events-none' : 'cursor-pointer hover:shadow-xl hover:scale-[1.01]'}`}
       onClick={onSelect}
     >
@@ -71,111 +75,204 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   const [isSheetSettingsOpen, setIsSheetSettingsOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
+  const [isPullingFromSheet, setIsPullingFromSheet] = useState(false);
 
-  const collectionCards = props.cards.filter(c => ['reviewed', 'fetching_value'].includes(c.status));
-  const unsyncedCards = collectionCards.filter(c => !c.isSynced);
-  const needsReviewCards = props.cards.filter(c => ['needs_review', 'grading_failed', 'grading', 'challenging'].includes(c.status));
+  // ✅ Force-load feedback states
+  const [isForceLoading, setIsForceLoading] = useState(false);
+
+  // Status-based groupings
+  const inProgressCards = props.cards.filter(c =>
+    ['grading', 'challenging', 'generating_summary', 'regenerating_summary', 'fetching_value'].includes(c.status)
+  );
+
+  const needsReviewCards = props.cards.filter(c =>
+    ['needs_review', 'grading_failed'].includes(c.status)
+  );
+
+  const collectionCards = props.cards.filter(c =>
+    !inProgressCards.some(x => x.id === c.id) && !needsReviewCards.some(x => x.id === c.id)
+  );
+
+  const unsyncedCards = props.cards.filter(c => !c.isSynced);
 
   const handleResyncAll = () => {
-    if (collectionCards.length === 0) {
-        alert("No graded cards in collection to sync.");
-        return;
+    if (props.cards.length === 0) {
+      alert("No cards in collection to sync.");
+      return;
     }
-    setCustomSyncList(collectionCards);
+    setCustomSyncList(props.cards);
     setIsSyncModalOpen(true);
+  };
+
+  const handleSyncFromSheet = async () => {
+    if (!props.onSyncFromSheet) return;
+    if (!window.confirm("This will pull all records from your Google Sheet. Continue?")) return;
+
+    setIsPullingFromSheet(true);
+    try {
+      await props.onSyncFromSheet();
+    } catch (err) {
+      alert("Failed to sync from sheet. Please check your URL in settings.");
+    } finally {
+      setIsPullingFromSheet(false);
+    }
+  };
+
+  const handleForceLoadFromDrive = async () => {
+    if (!props.onLoadCollection) {
+      alert("Force load is not available.");
+      return;
+    }
+
+    setIsForceLoading(true);
+    try {
+      await Promise.resolve(props.onLoadCollection());
+    } catch (e: any) {
+      console.error('[Force Load] failed:', e);
+      alert(`Force load failed: ${e?.message || e}`);
+    } finally {
+      setIsForceLoading(false);
+    }
   };
 
   return (
     <div className="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6 animate-fade-in">
-        <div className="flex justify-between items-center">
-            <button onClick={props.onBack} className="flex items-center gap-2 text-blue-600 font-bold hover:text-blue-500 transition">
-                <BackIcon className="w-5 h-5" /> Back
-            </button>
-            <h1 className="text-2xl font-bold">My Collection</h1>
-            <button onClick={() => setIsSheetSettingsOpen(true)} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition">
-                <CogIcon className="w-5 h-5" />
-            </button>
+      <div className="flex justify-between items-center">
+        <button onClick={props.onBack} className="flex items-center gap-2 text-blue-600 font-bold hover:text-blue-500 transition">
+          <BackIcon className="w-5 h-5" /> Back
+        </button>
+
+        <div className="text-center">
+          <h1 className="text-2xl font-bold">My Collection</h1>
+          <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">
+            Visible: {props.cards.length} | Total Data: {props.cards.length}
+          </p>
         </div>
 
-        <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
-            <div className="flex items-center gap-3">
-                <div className="bg-green-100 p-2 rounded-lg"><GoogleSheetIcon className="w-6 h-6" /></div>
-                <div>
-                    <p className="text-sm font-bold">Google Sheets Sync</p>
-                    <p className="text-xs text-slate-500">{unsyncedCards.length} pending</p>
-                </div>
-            </div>
-            <div className="flex gap-2">
-                <button 
-                  onClick={handleResyncAll} 
-                  disabled={collectionCards.length === 0}
-                  className="flex items-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
-                >
-                    <ResyncIcon className="w-5 h-5" />
-                    <span className="hidden sm:inline">Resync All</span>
-                </button>
-                <button 
-                  onClick={() => { setCustomSyncList(null); setIsSyncModalOpen(true); }} 
-                  disabled={unsyncedCards.length === 0} 
-                  className="flex items-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50"
-                >
-                    <CheckIcon className="w-5 h-5" />
-                    <span>Sync</span>
-                </button>
-            </div>
-        </div>
+        <button onClick={() => setIsSheetSettingsOpen(true)} className="p-2 bg-slate-100 rounded-lg hover:bg-slate-200 transition">
+          <CogIcon className="w-5 h-5" />
+        </button>
+      </div>
 
-        <div className="space-y-8">
-            {needsReviewCards.length > 0 && (
-                <div className="space-y-3">
-                    <h2 className="text-lg font-bold text-blue-700">In Progress / Pending</h2>
-                    {needsReviewCards.map(c => (
-                        <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
-                    ))}
-                </div>
+      <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-col sm:flex-row justify-between items-center gap-4">
+        <div className="flex items-center gap-3">
+          <div className="bg-green-100 p-2 rounded-lg"><GoogleSheetIcon className="w-6 h-6" /></div>
+          <div>
+            <p className="text-sm font-bold">Google Sheets Sync</p>
+            <p className="text-xs text-slate-500">{unsyncedCards.length} pending</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 justify-center">
+          <button
+            onClick={handleSyncFromSheet}
+            disabled={isPullingFromSheet}
+            className="flex items-center gap-2 py-2 px-4 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
+          >
+            {isPullingFromSheet ? <SpinnerIcon className="w-5 h-5" /> : <ResyncIcon className="w-5 h-5" />}
+            <span className="hidden sm:inline">{isPullingFromSheet ? 'Syncing...' : 'Sync From Sheet'}</span>
+          </button>
+
+          <button
+            onClick={handleResyncAll}
+            disabled={props.cards.length === 0}
+            className="flex items-center gap-2 py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-lg transition disabled:opacity-50"
+          >
+            <ResyncIcon className="w-5 h-5" />
+            <span className="hidden sm:inline">Resync All To Sheet</span>
+          </button>
+
+          <button
+            onClick={() => { setCustomSyncList(null); setIsSyncModalOpen(true); }}
+            disabled={unsyncedCards.length === 0}
+            className="flex items-center gap-2 py-2 px-6 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition disabled:opacity-50"
+          >
+            <CheckIcon className="w-5 h-5" />
+            <span>Sync New</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-8">
+        {inProgressCards.length > 0 && (
+          <div className="space-y-3">
+            <h2 className="text-lg font-bold text-blue-700">In Progress</h2>
+            {inProgressCards.map(c => (
+              <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
+            ))}
+          </div>
+        )}
+
+        {needsReviewCards.length > 0 && (
+          <div className="space-y-3">
+            <h2 className="text-lg font-bold text-blue-700">Pending Review / Issues</h2>
+            {needsReviewCards.map(c => (
+              <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
+            ))}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-bold text-slate-800">Collection ({collectionCards.length})</h2>
+
+            {props.onLoadCollection && (
+              <button
+                onClick={handleForceLoadFromDrive}
+                disabled={isForceLoading}
+                className="text-xs font-bold text-blue-600 hover:underline disabled:opacity-50"
+              >
+                {isForceLoading ? 'Loading from Drive…' : 'Force Load from Drive'}
+              </button>
             )}
+          </div>
 
-            <div className="space-y-3">
-                <h2 className="text-lg font-bold text-slate-800">Collection ({collectionCards.length})</h2>
-                {props.cards.length === 0 ? (
-                    <div className="py-20 text-center text-slate-400 border-2 border-dashed rounded-xl bg-slate-50">
-                        <p className="mb-4">No cards found.</p>
-                        {props.onLoadCollection && (
-                             <button onClick={props.onLoadCollection} className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Drive</button>
-                        )}
-                    </div>
-                ) : (
-                    collectionCards.map(c => (
-                        <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
-                    ))
-                )}
+          {props.cards.length === 0 ? (
+            <div className="py-20 text-center text-slate-400 border-2 border-dashed rounded-xl bg-slate-50">
+              <p className="mb-4">No cards found in memory.</p>
+              <div className="flex gap-4 justify-center">
+                <button 
+                  onClick={handleForceLoadFromDrive} 
+                  disabled={isForceLoading}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 disabled:opacity-50"
+                >
+                    {isForceLoading && <SpinnerIcon className="w-5 h-5" />}
+                    {isForceLoading ? 'Loading...' : 'Load from Drive'}
+                </button>
+                <button onClick={handleSyncFromSheet} className="bg-green-600 text-white px-6 py-2 rounded-full font-bold shadow-lg">Load from Sheet</button>
+              </div>
             </div>
+          ) : (
+            collectionCards.map(c => (
+              <CardRow key={c.id} card={c} onSelect={() => setSelectedCard(c)} onDelete={() => props.onDelete(c.id)} />
+            ))
+          )}
         </div>
+      </div>
 
-        {selectedCard && (
-            <CardDetailModal 
-                card={selectedCard} 
-                onClose={() => setSelectedCard(null)} 
-                onChallengeGrade={props.onChallengeGrade} 
-                onAcceptGrade={props.onAcceptGrade}
-                onDelete={props.onDelete}
-                onManualGrade={props.onManualGrade}
-                onRetryGrading={props.onRetryGrading}
-                onGetMarketValue={props.onGetMarketValue}
-            />
-        )}
+      {selectedCard && (
+        <CardDetailModal
+          card={selectedCard}
+          onClose={() => setSelectedCard(null)}
+          onChallengeGrade={props.onChallengeGrade}
+          onAcceptGrade={props.onAcceptGrade}
+          onDelete={props.onDelete}
+          onManualGrade={props.onManualGrade}
+          onRetryGrading={props.onRetryGrading}
+          onGetMarketValue={props.onGetMarketValue}
+        />
+      )}
 
-        {isSheetSettingsOpen && <SheetSettingsModal onClose={() => setIsSheetSettingsOpen(false)} />}
+      {isSheetSettingsOpen && <SheetSettingsModal onClose={() => setIsSheetSettingsOpen(false)} />}
 
-        {isSyncModalOpen && (
-            <SyncSheetModal 
-                cardsToSync={customSyncList || unsyncedCards}
-                onClose={() => { setIsSyncModalOpen(false); setCustomSyncList(null); }}
-                getAccessToken={props.getAccessToken}
-                onSyncSuccess={props.onCardsSynced}
-                userName={props.userName}
-            />
-        )}
+      {isSyncModalOpen && (
+        <SyncSheetModal
+          cardsToSync={customSyncList || unsyncedCards}
+          onClose={() => { setIsSyncModalOpen(false); setCustomSyncList(null); }}
+          getAccessToken={props.getAccessToken}
+          onSyncSuccess={props.onCardsSynced}
+          userName={props.userName}
+        />
+      )}
     </div>
   );
 };

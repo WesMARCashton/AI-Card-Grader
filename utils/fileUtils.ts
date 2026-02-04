@@ -19,15 +19,45 @@ export const dataUrlToBase64 = (dataUrl: string): string => {
 }
 
 /**
+ * Resizes an image (dataUrl) to a maximum width to reduce payload size for the Gemini API.
+ * This helps stay within Tokens Per Minute (TPM) limits and prevents 429 errors.
+ */
+export const optimizeImageForGemini = async (dataUrl: string, maxWidth = 1024): Promise<string> => {
+    if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl;
+    
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            let width = img.width;
+            let height = img.height;
+
+            if (width > maxWidth) {
+                height = Math.round((height * maxWidth) / width);
+                width = maxWidth;
+            }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                resolve(dataUrl);
+                return;
+            }
+            
+            ctx.drawImage(img, 0, 0, width, height);
+            // Use JPEG at 0.8 quality for a good balance of detail and file size
+            resolve(canvas.toDataURL('image/jpeg', 0.8));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+    });
+};
+
+/**
  * Ensures that the image data string is a valid data URL.
- * If it's a raw base64 string, it prepends the necessary prefix.
- * If it's already a data URL, it returns it as is.
- * Handles null/undefined/non-string gracefully to prevent app crashes.
- * @param imageData The image data string (either base64 or a full data URL).
- * @returns A full data URL string or an empty string if input is invalid.
  */
 export const ensureDataUrl = (imageData: any): string => {
-    // Strict type check: if it's not a string (e.g. null, undefined, number, object), return empty string.
     if (imageData === null || imageData === undefined || typeof imageData !== 'string') {
         return '';
     }
@@ -35,7 +65,6 @@ export const ensureDataUrl = (imageData: any): string => {
     if (imageData.startsWith('data:')) {
         return imageData;
     }
-    // Only append prefix if it looks like a base64 string (not empty)
     if (imageData.length > 0) {
         return `data:image/jpeg;base64,${imageData}`;
     }
