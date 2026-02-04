@@ -32,15 +32,19 @@ const getAI = () => {
 };
 
 const handleApiError = (e: any) => {
-    console.error("Gemini API Error:", e);
-    const errorStr = String(e);
+    console.error("Gemini API Error Detail:", e);
+    const errorStr = String(e).toLowerCase();
     
-    // Specifically catch Quota/429 errors
-    if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("RESOURCE_EXHAUSTED")) {
+    // Check for quota/429 specifically
+    if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
+        // If the message contains "check your plan", it's usually an account/billing link issue
+        if (errorStr.includes("check your plan") || errorStr.includes("billing")) {
+            throw new Error("BILLING_LINK_REQUIRED");
+        }
         throw new Error("QUOTA_EXHAUSTED");
     }
     
-    if (errorStr.includes("API_KEY_INVALID")) {
+    if (errorStr.includes("api_key_invalid") || errorStr.includes("key not found")) {
         throw new Error("API_KEY_INVALID");
     }
 
@@ -48,6 +52,31 @@ const handleApiError = (e: any) => {
 };
 
 const NGA_SYSTEM = `You are a professional NGA sports card grader. You are extremely strict. PSA 10s (Gem Mint) are rare. You analyze centering, corners, edges, and surface. Return your analysis in strict JSON format only.`;
+
+/**
+ * Tests the current API key with a minimal request to check quota status.
+ */
+export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
+    try {
+        const ai = getAI();
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-lite-preview',
+            contents: "hi",
+            config: { maxOutputTokens: 5 }
+        });
+        if (response.text) return { success: true, message: "Connection Successful! Your key is active." };
+        return { success: false, message: "Connected but received empty response." };
+    } catch (e: any) {
+        const err = String(e).toLowerCase();
+        if (err.includes("429") || err.includes("quota")) {
+            return { 
+                success: false, 
+                message: "Quota Exceeded (429). Your key is valid, but Google is limiting requests. Ensure billing is linked in AI Studio." 
+            };
+        }
+        return { success: false, message: e.message || "Connection failed. Check your API key." };
+    }
+};
 
 export const analyzeCardFull = async (f64: string, b64: string): Promise<any> => {
     try {

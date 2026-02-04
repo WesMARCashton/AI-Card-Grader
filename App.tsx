@@ -66,6 +66,7 @@ const App: React.FC = () => {
 
   const { user, signOut, getAccessToken, isAuthReady } = useGoogleAuth();
   const [view, setView] = useState<AppView>('scanner');
+  const [quotaPause, setQuotaPause] = useState(false);
   
   const [cards, setCards] = useState<CardData[]>(() => {
     const recoveredMap = new Map<string, any>();
@@ -199,24 +200,31 @@ const App: React.FC = () => {
       }
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false } : c));
+      setQuotaPause(false); // Clear pause on success
     } catch (e: any) {
       if (e.message === 'API_KEY_MISSING') {
           alert("API Key not found. Please click the 'cog' icon and enter your Gemini API Key.");
           setView('history');
-      } else if (e.message === 'QUOTA_EXHAUSTED') {
-          alert("Quota Exceeded (Error 429).\n\nSince your project is in 'Paid Tier 1', check these two things:\n\n1. Verify your API Key: In Google AI Studio, click 'API Keys' and make sure the key you are using belongs to the 'NGA Card Grader' project.\n\n2. Wait a few minutes: Billing status sometimes takes up to an hour to propagate to the AI models.\n\nTry retrying this card in 15 minutes.");
+      } else if (e.message === 'BILLING_LINK_REQUIRED') {
+          alert("Quota Exceeded (429 Error).\n\nIMPORTANT: Even if you see 'Paid Tier 1', your API Key must be linked to that specific billing project.\n\n1. Go to aistudio.google.com/app/billing\n2. Click 'Setup Billing' on the 'NGA Card Grader' project.\n3. Verify your API Key matches that project.");
+          setQuotaPause(true); // Stop processing the rest of the queue
           setView('history');
+      } else if (e.message === 'QUOTA_EXHAUSTED') {
+          // This is a temporary "you are going too fast" limit
+          setQuotaPause(true);
+          setTimeout(() => setQuotaPause(false), 60000); // Resume in 1 minute
       }
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
     } finally { processingCards.current.delete(card.id); }
   }, []);
 
   useEffect(() => {
+    if (quotaPause) return; // Don't try if we know we are paused
     const queue = cards.filter(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status) && !processingCards.current.has(c.id));
     if (queue.length > 0 && processingCards.current.size < 1) {
         queue.slice(0, 1).forEach(processCard);
     }
-  }, [cards, processCard]);
+  }, [cards, processCard, quotaPause]);
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -265,6 +273,13 @@ const App: React.FC = () => {
           <CardScanner onRatingRequest={(f, b) => { setCards(cur => [{ id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', status: 'grading' }, ...cur]); setView('history'); }} isGrading={cards.some(c => ['grading', 'challenging'].includes(c.status))} isLoggedIn={!!user} hasCards={cards.length > 0} onSyncDrive={() => refreshCollection(false)} isSyncing={syncStatus === 'loading'} />
         )}
       </main>
+      {quotaPause && (
+        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:w-96 bg-yellow-50 border border-yellow-200 p-3 rounded-lg shadow-lg flex items-center gap-3 animate-slide-up z-50">
+           <SpinnerIcon className="w-5 h-5 text-yellow-600" />
+           <p className="text-xs text-yellow-800 font-bold">Queue Paused: Hit Google's limit. Trying again in 60s...</p>
+           <button onClick={() => setQuotaPause(false)} className="text-[10px] bg-yellow-200 hover:bg-yellow-300 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
+        </div>
+      )}
     </div>
   );
 };

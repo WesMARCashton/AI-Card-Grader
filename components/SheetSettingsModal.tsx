@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { CheckIcon, KeyIcon } from './icons';
+import { CheckIcon, KeyIcon, SpinnerIcon, ResyncIcon } from './icons';
+import { testConnection } from '../services/geminiService';
 
 interface SheetSettingsModalProps {
     onClose: () => void;
@@ -13,6 +14,7 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
     const [sheetUrl, setSheetUrl] = useState('');
     const [apiKey, setApiKey] = useState('');
     const [isSaved, setIsSaved] = useState(false);
+    const [testStatus, setTestStatus] = useState<{ loading: boolean; result?: string; success?: boolean }>({ loading: false });
 
     useEffect(() => {
         const savedUrl = localStorage.getItem(SHEET_STORAGE_KEY);
@@ -28,10 +30,8 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
         localStorage.setItem(SHEET_STORAGE_KEY, cleanUrl);
         localStorage.setItem(API_KEY_STORAGE_KEY, cleanKey);
         
-        // Immediate update for the current session's environment object
         if (cleanKey) {
             (process.env as any).API_KEY = cleanKey;
-            console.log("[Settings] API Key updated in session.");
         }
         
         setIsSaved(true);
@@ -39,6 +39,21 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
             setIsSaved(false);
             onClose();
         }, 1000);
+    };
+
+    const handleTestKey = async () => {
+        if (!apiKey.trim()) return;
+        setTestStatus({ loading: true });
+        
+        // Temporarily set the key for the test if it hasn't been saved yet
+        const oldKey = (process.env as any).API_KEY;
+        (process.env as any).API_KEY = apiKey.trim();
+        
+        const result = await testConnection();
+        setTestStatus({ loading: false, result: result.message, success: result.success });
+        
+        // Restore key if it was just a temporary test
+        if (!isSaved) (process.env as any).API_KEY = oldKey;
     };
 
     const handleManageApiKey = async () => {
@@ -50,13 +65,13 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                 alert("Failed to open key selection. Please use manual entry below.");
             }
         } else {
-            alert("System key picker is not available in this host. Please paste your API key in the 'Manual Entry' box.");
+            alert("System key picker is not available in this host.");
         }
     };
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4 animate-fade-in" onClick={onClose}>
-            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-4">
                     <h2 className="text-xl font-bold text-slate-800">App Settings</h2>
                     <button onClick={onClose} className="text-slate-500 hover:text-slate-800 text-2xl">&times;</button>
@@ -68,23 +83,35 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                         <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-2">
                             <KeyIcon className="w-4 h-4" /> Grader API Connection
                         </h3>
-                        <p className="text-[11px] text-blue-700 mb-4">
-                            Ensure the API key you use belongs to your <strong>Paid Project</strong> in AI Studio.
-                        </p>
                         
                         <div className="space-y-3">
                             <div>
                                 <label htmlFor="manual-api-key" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Enter API Key Manually</label>
-                                <input
-                                    type="password"
-                                    id="manual-api-key"
-                                    value={apiKey}
-                                    onChange={(e) => setApiKey(e.target.value)}
-                                    placeholder="AIzaSy..."
-                                    className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm font-mono"
-                                />
-                                <p className="text-[9px] text-slate-400 mt-1">Found in AI Studio &gt; API Keys</p>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="password"
+                                        id="manual-api-key"
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        placeholder="AIzaSy..."
+                                        className="flex-grow px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm font-mono"
+                                    />
+                                    <button 
+                                        onClick={handleTestKey}
+                                        disabled={testStatus.loading || !apiKey.trim()}
+                                        className="px-3 py-2 bg-white border border-blue-300 text-blue-600 rounded-md hover:bg-blue-50 disabled:opacity-50 transition shadow-sm flex items-center gap-1 text-xs font-bold"
+                                    >
+                                        {testStatus.loading ? <SpinnerIcon className="w-4 h-4" /> : <ResyncIcon className="w-4 h-4" />}
+                                        Test
+                                    </button>
+                                </div>
                             </div>
+
+                            {testStatus.result && (
+                                <div className={`p-2 rounded text-[10px] font-medium border ${testStatus.success ? 'bg-green-100 border-green-200 text-green-800' : 'bg-red-100 border-red-200 text-red-800'}`}>
+                                    {testStatus.result}
+                                </div>
+                            )}
                             
                             <div className="relative flex py-1 items-center">
                                 <div className="flex-grow border-t border-blue-200"></div>
@@ -106,7 +133,7 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                             rel="noreferrer"
                             className="block text-[10px] text-blue-500 hover:underline mt-2 text-center"
                         >
-                            Learn more about Gemini API billing
+                            Learn about Billing & Quotas
                         </a>
                     </div>
 
@@ -121,7 +148,6 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                             placeholder="https://docs.google.com/spreadsheets/d/..."
                             className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                         />
-                        <p className="text-[10px] text-slate-500 mt-2">Where your collection data will be exported.</p>
                     </div>
 
                     <div className="flex justify-end gap-3 pt-2">
