@@ -163,9 +163,11 @@ const App: React.FC = () => {
       
       setDriveFileId(fileId);
       setSyncStatus('success');
-    } catch (e) {
-      setSyncStatus('error');
-      if (!silent) alert("Sync failed. Please check your internet connection and Google Drive permissions.");
+    } catc} catch (e: any) {
+          setSyncStatus('error');
+          const errorMsg = e?.message || 'Unknown error occurred';
+          console.error('Full sync error:', e);
+          if (!silent) alert(`Sync failed: ${errorMsg}`);
     }
   }, [user, getAccessToken]);
 
