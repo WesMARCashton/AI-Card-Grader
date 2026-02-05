@@ -6,8 +6,6 @@ import { CameraIcon, UploadIcon, SpinnerIcon, CheckIcon, ResyncIcon } from './ic
 
 interface CardScannerProps {
   onRatingRequest: (front: string, back: string) => void;
-  isGrading: boolean;
-  gradingStatus?: string;
   isLoggedIn: boolean;
   hasCards: boolean;
   onSyncDrive: () => void;
@@ -19,8 +17,6 @@ type TargetSide = 'front' | 'back';
 
 export const CardScanner: React.FC<CardScannerProps> = ({ 
   onRatingRequest, 
-  isGrading, 
-  gradingStatus, 
   isLoggedIn, 
   hasCards, 
   onSyncDrive,
@@ -29,6 +25,7 @@ export const CardScanner: React.FC<CardScannerProps> = ({
   const [frontImage, setFrontImage] = useState<string | null>(null);
   const [backImage, setBackImage] = useState<string | null>(null);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [scanMode, setScanMode] = useState<ScanMode>('upload');
   const [cameraTarget, setCameraTarget] = useState<TargetSide>('front');
   const [confirmation, setConfirmation] = useState('');
@@ -102,9 +99,13 @@ export const CardScanner: React.FC<CardScannerProps> = ({
 
   const handleGetRating = () => {
     if (frontImage && backImage) {
+      setIsSubmitting(true);
       onRatingRequest(frontImage, backImage);
+      // Note: Components usually unmount here because App changes view,
+      // but we clear states just in case.
       setFrontImage(null);
       setBackImage(null);
+      setIsSubmitting(false);
       setConfirmation('Card added to collection!');
     }
   };
@@ -112,7 +113,7 @@ export const CardScanner: React.FC<CardScannerProps> = ({
   const renderImageSlot = (side: TargetSide, image: string | null, fileRef: React.RefObject<HTMLInputElement>) => (
     <div 
       className="relative w-full aspect-[2.5/3.5] bg-slate-100/80 border-2 border-dashed border-slate-400 rounded-lg flex flex-col justify-center items-center text-slate-500 cursor-pointer hover:border-blue-500 hover:bg-slate-200/80 transition-all duration-300 group"
-      onClick={() => !isOptimizing && fileRef.current?.click()}
+      onClick={() => !isOptimizing && !isSubmitting && fileRef.current?.click()}
     >
       {image ? (
         <img src={image} alt={`${side} of card`} className="absolute inset-0 w-full h-full object-contain rounded-lg" />
@@ -157,7 +158,8 @@ export const CardScanner: React.FC<CardScannerProps> = ({
       {!stream && (
         <button
           onClick={handleStartCamera}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition-transform transform hover:scale-[1.02] border border-slate-300"
+          disabled={isSubmitting}
+          className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-white/70 hover:bg-white text-slate-800 font-semibold rounded-lg shadow-md transition-transform transform hover:scale-[1.02] border border-slate-300 disabled:opacity-50"
         >
           <CameraIcon className="h-6 w-6 text-blue-500" />
           <span>Scan with Camera</span>
@@ -175,7 +177,7 @@ export const CardScanner: React.FC<CardScannerProps> = ({
             <div className="flex gap-4">
                 <button 
                     onClick={handleCapture} 
-                    disabled={isOptimizing}
+                    disabled={isOptimizing || isSubmitting}
                     className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg disabled:opacity-50"
                 >
                     {isOptimizing ? 'Resizing...' : `Capture ${cameraTarget}`}
@@ -197,13 +199,13 @@ export const CardScanner: React.FC<CardScannerProps> = ({
         
         <button
           onClick={handleGetRating}
-          disabled={!frontImage || !backImage || isGrading || isOptimizing}
+          disabled={!frontImage || !backImage || isSubmitting || isOptimizing}
           className="w-full py-4 px-4 bg-gradient-to-r from-[#3e85c7] to-[#ffcb05] text-white text-lg font-bold rounded-lg shadow-lg transition-all transform hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 flex items-center justify-center gap-3"
         >
-          {isGrading ? (
+          {isSubmitting ? (
             <>
               <SpinnerIcon className="w-6 h-6" />
-              <span>{gradingStatus || 'Processing...'}</span>
+              <span>Processing...</span>
             </>
           ) : 'Identify & Grade Card'}
         </button>

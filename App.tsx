@@ -293,7 +293,16 @@ const App: React.FC = () => {
             isRewriting={false} rewriteProgress={0} rewrittenCount={0} rewriteFailCount={0} rewriteStatusMessage={''}
           />
         ) : (
-          <CardScanner onRatingRequest={(f, b) => { setCards(cur => [{ id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', status: 'grading' }, ...cur]); setView('history'); }} isGrading={cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status))} isLoggedIn={!!user} hasCards={cards.length > 0} onSyncDrive={() => refreshCollection(false)} isSyncing={syncStatus === 'loading'} />
+          <CardScanner 
+            onRatingRequest={(f, b) => { 
+                setCards(cur => [{ id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', status: 'grading' }, ...cur]); 
+                setView('history'); 
+            }} 
+            isLoggedIn={!!user} 
+            hasCards={cards.length > 0} 
+            onSyncDrive={() => refreshCollection(false)} 
+            isSyncing={syncStatus === 'loading'} 
+          />
         )}
       </main>
       
