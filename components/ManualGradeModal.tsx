@@ -76,15 +76,15 @@ export const ManualGradeModal: React.FC<ManualGradeModalProps> = ({
                 [field]: value
             }
         }));
-        // If they manually change a sub-grade, we assume they don't want a generic auto-fill
         setAutoAdjust(false);
     };
 
     const handleSmartFill = () => {
-        // Reset sub-grades to a "pending" state so the AI knows to reinvent them
-        // based on the overall score.
+        // Reset sub-grades to 0 and set notes to [Regenerate]
+        // This forces the AI to invent both the score AND the note to match the target.
         const resetDetails = { ...details };
         Object.keys(resetDetails).forEach(key => {
+            (resetDetails as any)[key].grade = 0;
             (resetDetails as any)[key].notes = "[Regenerate]";
         });
         setDetails(resetDetails);
@@ -111,7 +111,7 @@ export const ManualGradeModal: React.FC<ManualGradeModalProps> = ({
                 <div className="flex justify-between items-center mb-6 border-b pb-4">
                     <div>
                         <h2 className="text-2xl font-bold text-slate-800">Grader Worksheet</h2>
-                        <p className="text-xs text-slate-500 font-medium mt-1">AI will rewrite descriptions to justify your scores.</p>
+                        <p className="text-xs text-slate-500 font-medium mt-1">Adjust scores manually or use Smart Fill to justify a target grade.</p>
                     </div>
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors text-3xl">&times;</button>
                 </div>
@@ -148,7 +148,7 @@ export const ManualGradeModal: React.FC<ManualGradeModalProps> = ({
                         </div>
                         <button 
                             onClick={handleSmartFill}
-                            className="absolute -bottom-3 right-6 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-full shadow-md flex items-center gap-1.5 transition active:scale-95"
+                            className="absolute -bottom-3 right-6 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-3 py-1.5 rounded-full shadow-md flex items-center gap-1.5 transition active:scale-95 z-10"
                         >
                             <ResyncIcon className="w-3 h-3" />
                             Auto-Adjust Categories to Match
@@ -158,8 +158,8 @@ export const ManualGradeModal: React.FC<ManualGradeModalProps> = ({
                     {/* technical breakdown section */}
                     <div className="space-y-6 pt-4">
                         <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest border-b pb-2 flex justify-between">
-                            Technical Breakdown (Scores in 0.5)
-                            {autoAdjust && <span className="text-[10px] text-blue-500 animate-pulse lowercase">✨ smart fill active</span>}
+                            Technical Breakdown
+                            {autoAdjust && <span className="text-[10px] text-blue-500 animate-pulse lowercase">✨ AI will recalculate these</span>}
                         </h3>
                         
                         {categories.map((cat) => (
@@ -168,12 +168,13 @@ export const ManualGradeModal: React.FC<ManualGradeModalProps> = ({
                                     <label className="block text-sm font-bold text-slate-700 mb-1">{cat.label}</label>
                                     <input
                                         type="number"
-                                        value={details[cat.key].grade}
+                                        value={details[cat.key].grade || 0}
                                         onChange={(e) => handleDetailChange(cat.key, 'grade', parseFloat(e.target.value) || 0)}
                                         min="0" max="10" step="0.5"
-                                        className="w-full px-3 py-2 border border-slate-300 rounded-md font-bold text-blue-600 focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                                        className={`w-full px-3 py-2 border rounded-md font-bold focus:ring-2 focus:ring-blue-400 focus:outline-none ${details[cat.key].grade === 0 ? 'border-blue-300 text-blue-400 italic' : 'border-slate-300 text-blue-600'}`}
                                         disabled={isSaving}
                                     />
+                                    {details[cat.key].grade === 0 && <p className="text-[9px] text-blue-500 mt-1 font-bold">SET BY AI</p>}
                                 </div>
                                 <div className="sm:col-span-9">
                                     <label className="block text-xs font-semibold text-slate-500 mb-1">Observations</label>

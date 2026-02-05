@@ -44,7 +44,6 @@ const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
 
 /**
  * Retries with backoff and a hard 50s timeout.
- * Includes handling for 503 Overloaded and 429 Quota errors.
  */
 const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 4, delay = 5000): Promise<T> => {
     try {
@@ -61,13 +60,12 @@ const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 4, delay =
             errStr.includes("unavailable") ||
             errStr.includes("resource_exhausted");
 
-        // If it's specifically a daily limit error, retrying immediately won't help
-        if (errStr.includes("daily") && errStr.includes("limit")) {
+        if ((errStr.includes("daily") && errStr.includes("limit")) || errStr.includes("403") || errStr.includes("disabled")) {
             throw e; 
         }
 
         if (isRetryable && maxRetries > 0) {
-            console.warn(`Gemini API Busy/Limited (${errStr}). Retrying ${maxRetries} more times in ${delay}ms...`);
+            console.warn(`Gemini API Busy/Limited (${errStr}). Retrying ${maxRetries} more times...`);
             await new Promise(r => setTimeout(r, delay));
             return retryWithBackoff(fn, maxRetries - 1, delay * 2);
         }
@@ -80,24 +78,24 @@ const handleApiError = (e: any, context: string = "general") => {
     const errorStr = String(e).toLowerCase();
     
     if (e.message === "API_TIMEOUT") {
-        throw new Error("The AI took too long to respond. This can happen on slow connections.");
+        throw new Error("The AI took too long to respond.");
+    }
+
+    if (errorStr.includes("403") || errorStr.includes("permission_denied") || errorStr.includes("disabled")) {
+        throw new Error("SERVICE_DISABLED: The Generative Language API is not enabled for this project.");
     }
 
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
         if (errorStr.includes("daily") || errorStr.includes("20")) {
-            throw new Error("DAILY_QUOTA_REACHED: You have used all 20 free requests for today. To continue, you must enable billing in Google Cloud for your project.");
+            throw new Error("DAILY_QUOTA_REACHED: You have used all 20 free requests for today.");
         }
-        throw new Error("QUOTA_EXHAUSTED: You are sending requests too fast. Please wait 60 seconds.");
+        throw new Error("QUOTA_EXHAUSTED: You are sending requests too fast.");
     }
 
     if (errorStr.includes("503") || errorStr.includes("overloaded") || errorStr.includes("unavailable")) {
-        throw new Error("SERVER_OVERLOADED: The AI model is currently receiving too many requests. Please try again in a few moments.");
+        throw new Error("SERVER_OVERLOADED: The AI model is currently busy. Try again shortly.");
     }
     
-    if (errorStr.includes("api_key_invalid") || errorStr.includes("key not found")) {
-        throw new Error("API_KEY_INVALID: The provided API key is either incorrect or has been disabled.");
-    }
-
     throw new Error(e.message || "Unknown API Error");
 };
 
@@ -120,7 +118,7 @@ const NGA_SYSTEM = `You are a professional NGA sports card grader. You MUST stri
 3. DESIGNATION MAP:
 10: GEM MT, 9.5: MINT+, 9: MINT, 8.5: NM-MT+, 8: NM-MT, 7.5: NM+, 7: NM, 6.5: EX-MT+, 6: EX-MT, 5.5: EX+, 5: EX, 4.5: VG-EX+, 4: VG-EX, 3.5: VG+, 3: VG, 2.5: GOOD+, 2: GOOD, 1.5: FAIR, 1: POOR.
 
-Return JSON only.`;
+Return JSON ONLY.`;
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
     try {
@@ -143,11 +141,15 @@ export const analyzeCardFull = async (f64: string, b64: string): Promise<any> =>
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: { parts: [
-                    { text: "Identify this card and provide an NGA grade (1-10). Return JSON: { \"name\": \"...\", \"team\": \"...\", \"year\": \"...\", \"set\": \"...\", \"company\": \"...\", \"cardNumber\": \"...\", \"edition\": \"...\", \"details\": { \"centering\": {\"grade\": 0, \"notes\": \"\"}, \"corners\": {\"grade\": 0, \"notes\": \"\"}, \"edges\": {\"grade\": 0, \"notes\": \"\"}, \"surface\": {\"grade\": 0, \"notes\": \"\"}, \"printQuality\": {\"grade\": 0, \"notes\": \"\"} }, \"overallGrade\": 0, \"gradeName\": \"...\", \"summary\": \"...\" }" },
+                    { text: "Identify this card and provide an NGA grade (1-10). Return JSON." },
                     { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                     { inlineData: { mimeType: 'image/jpeg', data: b64 } },
                 ]},
-                config: { systemInstruction: NGA_SYSTEM, responseMimeType: "application/json", temperature: 0.1 }
+                config: { 
+                    systemInstruction: NGA_SYSTEM, 
+                    responseMimeType: "application/json", 
+                    temperature: 0.1 
+                }
             });
             return extractJson(response);
         });
@@ -205,28 +207,38 @@ export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb
 export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, card: CardData, grade: number, gradeName: string, details: EvaluationDetails): Promise<any> => {
     try {
         const ai = getAI();
-        const breakdownContext = `
-        User Request:
-        - Target Overall Grade: ${grade} (${gradeName})
         
-        Input Category Values (Strictly follow these numbers):
-        - Centering: ${details.centering.grade} (Existing Note: ${details.centering.notes})
-        - Corners: ${details.corners.grade} (Existing Note: ${details.corners.notes})
-        - Edges: ${details.edges.grade} (Existing Note: ${details.edges.notes})
-        - Surface: ${details.surface.grade} (Existing Note: ${details.surface.notes})
-        - Print Quality: ${details.printQuality.grade} (Existing Note: ${details.printQuality.notes})
-        `;
-
-        const prompt = `The user has manually updated the numeric grades for this card. 
+        const prompt = `
+        The user has manually overridden the grade for this card to: ${grade} (${gradeName}).
         
         YOUR TASK:
-        1. REWRITE the "notes" for EVERY category to match the new numeric values provided. If a numeric value changed (e.g. from 8 to 10), delete the old note and write a new one that describes a card with that specific score.
-        2. SMART FILL: If a category has the note "[Regenerate]", you must invent a score and note for that category so that the resulting NGA calculation matches the Target Overall Grade of ${grade}.
-        3. ENSURE CONSISTENCY: The category notes must explain why the card received that score (e.g., if Edges is 10, notes should say "Perfect edges").
-        4. REWRITE the "summary" (Official Grader Analysis) to be a high-quality professional justification for the final grade of ${grade}.
+        1. REWRITE the "notes" for every category to justify the numeric values provided.
+        2. SMART FILL: If a category grade is 0 OR the note is "[Regenerate]", you MUST determine a numeric score (1-10) and write a note for that category so that the resulting NGA calculation matches the Target Overall Grade of ${grade}.
+        3. ENSURE CONSISTENCY: The category notes must explain the defects or lack thereof associated with the score.
+        4. REWRITE the "summary" (Official Grader Analysis) to be a professional justification for the grade of ${grade}, referencing Rule 3C if caps are involved (e.g. creases or surface damage).
         
-        Technical Context:
-        ${breakdownContext}`;
+        Input Context:
+        - Centering: ${details.centering.grade} (Notes: ${details.centering.notes})
+        - Corners: ${details.corners.grade} (Notes: ${details.corners.notes})
+        - Edges: ${details.edges.grade} (Notes: ${details.edges.notes})
+        - Surface: ${details.surface.grade} (Notes: ${details.surface.notes})
+        - Print Quality: ${details.printQuality.grade} (Notes: ${details.printQuality.notes})
+
+        MANDATORY RESPONSE FORMAT:
+        Return a JSON object with this exact structure:
+        {
+          "overallGrade": ${grade},
+          "gradeName": "${gradeName}",
+          "details": {
+            "centering": { "grade": number, "notes": "string" },
+            "corners": { "grade": number, "notes": "string" },
+            "edges": { "grade": number, "notes": "string" },
+            "surface": { "grade": number, "notes": "string" },
+            "printQuality": { "grade": number, "notes": "string" }
+          },
+          "summary": "Full analysis text here"
+        }
+        `;
 
         return await retryWithBackoff(async () => {
             const response = await ai.models.generateContent({

@@ -44,6 +44,7 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
     };
 
     const isQuotaError = testStatus.result?.includes('429') || testStatus.result?.includes('quota');
+    const isDisabledError = testStatus.result?.includes('403') || testStatus.result?.includes('DISABLED');
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4 animate-fade-in" onClick={onClose}>
@@ -60,22 +61,38 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                         </h3>
                         
                         <div className="space-y-3">
-                            {isQuotaError && (
-                                <div className="p-3 bg-red-50 border border-red-200 rounded text-[11px] text-red-700 font-medium">
-                                    <strong className="block text-xs mb-1">⚠️ Quota/Daily Limit Hit!</strong>
-                                    Your error message shows you have exceeded the **20 requests per day** limit of the Free Tier. 
-                                    <div className="mt-2 space-y-1">
-                                        <p>1. Open <a href="https://console.cloud.google.com/billing" target="_blank" className="underline font-bold">Google Cloud Billing</a></p>
-                                        <p>2. Link your Project to a billing account (Credit Card).</p>
-                                        <p>3. This removes the 20-request daily cap.</p>
+                            {isDisabledError && (
+                                <div className="p-3 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-700 font-medium">
+                                    <strong className="block text-xs mb-1">🚫 API Not Enabled!</strong>
+                                    Your API key is working, but the **Generative Language API** is disabled for your project.
+                                    <div className="mt-2">
+                                        <a 
+                                            href="https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview" 
+                                            target="_blank" 
+                                            className="inline-block bg-amber-600 text-white px-3 py-1.5 rounded font-bold hover:bg-amber-700 transition"
+                                        >
+                                            Enable API Now
+                                        </a>
+                                        <p className="mt-2 text-[10px]">After enabling, wait 60 seconds for Google to sync.</p>
                                     </div>
                                 </div>
                             )}
 
-                            {!isQuotaError && (
+                            {isQuotaError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded text-[11px] text-red-700 font-medium">
+                                    <strong className="block text-xs mb-1">⚠️ Quota/Daily Limit Hit!</strong>
+                                    You have exceeded the **20 requests per day** limit of the Free Tier.
+                                    <div className="mt-2 space-y-1">
+                                        <p>1. Open <a href="https://console.cloud.google.com/billing" target="_blank" className="underline font-bold">Google Cloud Billing</a></p>
+                                        <p>2. Link your Project to a billing account (Credit Card).</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isQuotaError && !isDisabledError && (
                                 <div className="p-3 bg-white border border-blue-200 rounded text-[11px] text-blue-700 font-medium">
-                                    <strong>💡 Need more than 20 scans per day?</strong>
-                                    <p className="mt-1">Google's Free Tier limits you to 20 requests daily. To fix this, you must enable billing for your project in the Google Cloud Console.</p>
+                                    <strong>💡 Paid Account Setup:</strong>
+                                    <p className="mt-1">Ensure the 'Generative Language API' is enabled in your Google Cloud Console for the project linked to your API key.</p>
                                 </div>
                             )}
 
@@ -108,8 +125,8 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline font-bold flex items-center justify-center gap-1">
                                 <LinkIcon className="w-3 h-3" /> Get API Key (AI Studio)
                             </a>
-                            <a href="https://console.cloud.google.com/billing" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:underline font-bold flex items-center justify-center gap-1">
-                                <LinkIcon className="w-3 h-3" /> Manage Cloud Billing
+                            <a href="https://console.developers.google.com/apis/api/generativelanguage.googleapis.com/overview" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:underline font-bold flex items-center justify-center gap-1">
+                                <LinkIcon className="w-3 h-3" /> Enable Gemini API
                             </a>
                         </div>
                     </div>
