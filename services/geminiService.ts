@@ -99,26 +99,25 @@ const handleApiError = (e: any, context: string = "general") => {
     throw new Error(e.message || "Unknown API Error");
 };
 
-const NGA_SYSTEM = `You are a professional NGA sports card grader. You MUST strictly follow these NGA grading rules:
+const NGA_SYSTEM = `You are a professional NGA (Sports Card Grading) Expert. You MUST identify the card and then grade it strictly using the NGA whole-number system (1-10).
 
-1. EVALUATION CATEGORIES (Score 1-10 each):
+1. EVALUATION CRITERIA (Whole Numbers 1-10):
 - CENTERING (25%): 10 (50/50-55/45), 9 (60/40), 8 (70/30), 7 (80/20), 6 (85/15), 5-1 (>90/10).
-- CORNERS (25%): 10 (Razor sharp), 9 (Slightly soft), 8 (Two corners touched), 7 (Minor visible wear), 6 (Noticeable rounding), 5-4 (Rounded), 3-1 (Heavy wear).
-- EDGES (20%): 10 (Perfect), 9 (Tiny nick), 8 (Light wear), 7 (Noticeable whitening), 6 (Multiple nicks), 5-4 (Moderate chipping), 3-1 (Severe wear).
-- SURFACE (20%): 10 (Flawless), 9 (Tiny print line), 8 (Minor wear/light scratch), 7 (Small dent), 6 (Multiple scratches), 5-4 (Scuffing), 3-1 (Creases/deep scratches).
-- PRINT QUALITY (10%): 10 (Sharp focus), 9 (Slight print dot), 8 (Shadowing), 7 (Noticeable misprint), 6-4 (Poor color), 3-1 (Major error).
+- CORNERS (25%): 10 (Razor sharp), 9 (One corner soft), 8 (Two corners touched), 7 (Visible wear), 6 (Rounding/fray), 5-4 (Rounded), 3-1 (Heavy wear/bent).
+- EDGES (20%): 10 (Perfect), 9 (Tiny nick), 8 (Light wear), 7 (Noticeable whitening), 6 (Multiple nicks), 5-4 (Moderate chipping), 3-1 (Severe wear/peeling).
+- SURFACE (20%): 10 (Flawless), 9 (Tiny line), 8 (Minor wear), 7 (Small dent/clouding), 6 (Multiple scratches), 5-4 (Scuffing), 3-1 (Creases/deep scratches/stains).
+- PRINT QUALITY (10%): 10 (Sharp focus), 9 (Slight dot), 8 (Shadowing), 7 (Noticeable misprint), 6-4 (Poor color), 3-1 (Major error).
 
-2. FINAL GRADE CALCULATION:
-- STEP A: Start with the average of all five categories (rounded DOWN to the nearest whole or half number).
-- STEP B: Apply Penalties: If any category is 2+ grades below the others, reduce final grade by 1 point.
-- STEP C: Apply Caps:
-  - If SURFACE or CORNERS are below 6, the Overall Grade is CAPPED at 6.0.
-  - If the card has a CREASE, the Overall Grade is CAPPED at 5.0.
+2. FINAL CALCULATION (Crucial):
+- Start with the average of all five categories (round DOWN to nearest whole/half).
+- PENALTY: If any category is 2+ grades below others, reduce final grade by 1.
+- CAP: If SURFACE or CORNERS are < 6, max Overall Grade is 6.
+- CAP: If the card has a CREASE, max Overall Grade is 5.
 
 3. DESIGNATION MAP:
 10: GEM MT, 9.5: MINT+, 9: MINT, 8.5: NM-MT+, 8: NM-MT, 7.5: NM+, 7: NM, 6.5: EX-MT+, 6: EX-MT, 5.5: EX+, 5: EX, 4.5: VG-EX+, 4: VG-EX, 3.5: VG+, 3: VG, 2.5: GOOD+, 2: GOOD, 1.5: FAIR, 1: POOR.
 
-Return JSON ONLY.`;
+Return JSON ONLY. Identify the card first (Name, Team, Year, Set, Number).`;
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
     try {
@@ -141,7 +140,7 @@ export const analyzeCardFull = async (f64: string, b64: string): Promise<any> =>
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: { parts: [
-                    { text: "Identify this card and provide an NGA grade (1-10). Return JSON." },
+                    { text: "STEP 1: Identify the card in the images (Year, Company, Set, Name, Team, #). STEP 2: Grade the card based on NGA standards. Return JSON: { \"name\": \"...\", \"team\": \"...\", \"year\": \"...\", \"set\": \"...\", \"company\": \"...\", \"cardNumber\": \"...\", \"edition\": \"...\", \"details\": { \"centering\": {\"grade\": 0, \"notes\": \"\"}, \"corners\": {\"grade\": 0, \"notes\": \"\"}, \"edges\": {\"grade\": 0, \"notes\": \"\"}, \"surface\": {\"grade\": 0, \"notes\": \"\"}, \"printQuality\": {\"grade\": 0, \"notes\": \"\"} }, \"overallGrade\": 0, \"gradeName\": \"...\", \"summary\": \"...\" }" },
                     { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                     { inlineData: { mimeType: 'image/jpeg', data: b64 } },
                 ]},
@@ -191,7 +190,7 @@ export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: { parts: [
-                    { text: `Re-evaluate this card with a bias that the grade should be ${dir} than ${card.overallGrade}. Return updated JSON.` },
+                    { text: `Re-evaluate this card with a bias that the grade should be ${dir} than ${card.overallGrade}. Justify with new observations. Return updated JSON.` },
                     { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                     { inlineData: { mimeType: 'image/jpeg', data: b64 } },
                 ]},
@@ -209,23 +208,24 @@ export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, c
         const ai = getAI();
         
         const prompt = `
-        The user has manually overridden the grade for this card to: ${grade} (${gradeName}).
+        The user has OVERRIDDEN the grade to: ${grade} (${gradeName}).
         
-        YOUR TASK:
-        1. REWRITE the "notes" for every category to justify the numeric values provided.
-        2. SMART FILL: If a category grade is 0 OR the note is "[Regenerate]", you MUST determine a numeric score (1-10) and write a note for that category so that the resulting NGA calculation matches the Target Overall Grade of ${grade}.
-        3. ENSURE CONSISTENCY: The category notes must explain the defects or lack thereof associated with the score.
-        4. REWRITE the "summary" (Official Grader Analysis) to be a professional justification for the grade of ${grade}, referencing Rule 3C if caps are involved (e.g. creases or surface damage).
+        CRITICAL TASK:
+        1. YOU MUST REWRITE EVERY SINGLE "note" for centering, corners, edges, surface, and print quality. 
+        2. If a sub-grade is 0 or note is "[Regenerate]", assign a whole number (1-10) and write a detailed note that MATHEMATICALLY results in the overall grade of ${grade} per NGA rules.
+        3. If you must justify a 5.0, you MUST mention a crease in the surface notes.
+        4. If you must justify a 6.0 or lower, you MUST mention corner rounding or surface defects.
+        5. REWRITE the "summary" entirely. Do not use the old text. Justify why THIS specific card is exactly a ${grade}.
         
-        Input Context:
-        - Centering: ${details.centering.grade} (Notes: ${details.centering.notes})
-        - Corners: ${details.corners.grade} (Notes: ${details.corners.notes})
-        - Edges: ${details.edges.grade} (Notes: ${details.edges.notes})
-        - Surface: ${details.surface.grade} (Notes: ${details.surface.notes})
-        - Print Quality: ${details.printQuality.grade} (Notes: ${details.printQuality.notes})
+        Target Grade: ${grade} (${gradeName})
+        Current Data (Modify to match target):
+        - Centering: ${details.centering.grade}
+        - Corners: ${details.corners.grade}
+        - Edges: ${details.edges.grade}
+        - Surface: ${details.surface.grade}
+        - Print Quality: ${details.printQuality.grade}
 
-        MANDATORY RESPONSE FORMAT:
-        Return a JSON object with this exact structure:
+        Return JSON matching this exact structure:
         {
           "overallGrade": ${grade},
           "gradeName": "${gradeName}",
@@ -236,7 +236,7 @@ export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, c
             "surface": { "grade": number, "notes": "string" },
             "printQuality": { "grade": number, "notes": "string" }
           },
-          "summary": "Full analysis text here"
+          "summary": "WRITE NEW PROFESSIONAL ANALYSIS HERE"
         }
         `;
 
