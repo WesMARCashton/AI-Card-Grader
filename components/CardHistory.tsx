@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { CardData } from '../types';
+import { CardData, EvaluationDetails } from '../types';
 import { ExportIcon, BackIcon, TrashIcon, GoogleSheetIcon, ResyncIcon, SpinnerIcon, CheckIcon, CogIcon } from './icons';
 import { CardDetailModal } from './CardDetailModal';
 import { SyncSheetModal } from './SyncSheetModal';
@@ -24,8 +24,8 @@ interface CardHistoryProps {
   rewriteFailCount: number;
   rewriteStatusMessage: string;
   onAcceptGrade: (cardId: string) => void;
-  onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
-  onLoadCollection?: () => void | Promise<void>; // allow async
+  onManualGrade: (card: CardData, grade: number, gradeName: string, details: EvaluationDetails) => void;
+  onLoadCollection?: () => void | Promise<void>; 
   onSyncFromSheet?: () => Promise<void>;
   onGetMarketValue: (card: CardData) => void;
   userName: string;
@@ -76,11 +76,8 @@ export const CardHistory: React.FC<CardHistoryProps> = (props) => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [customSyncList, setCustomSyncList] = useState<CardData[] | null>(null);
   const [isPullingFromSheet, setIsPullingFromSheet] = useState(false);
-
-  // ✅ Force-load feedback states
   const [isForceLoading, setIsForceLoading] = useState(false);
 
-  // Status-based groupings
   const inProgressCards = props.cards.filter(c =>
     ['grading', 'challenging', 'generating_summary', 'regenerating_summary', 'fetching_value'].includes(c.status)
   );

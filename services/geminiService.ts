@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
-import { CardData, MarketValue } from "../types";
+import { CardData, MarketValue, EvaluationDetails } from "../types";
 import { dataUrlToBase64 } from "../utils/fileUtils";
 
 const API_KEY_STORAGE_KEY = 'manual_gemini_api_key';
@@ -92,7 +92,26 @@ const handleApiError = (e: any, context: string = "general") => {
     throw new Error(e.message || "Unknown API Error");
 };
 
-const NGA_SYSTEM = `You are a professional NGA sports card grader. Strict. PSA 10s are rare. Analysis centering, corners, edges, and surface. Return JSON only.`;
+const NGA_SYSTEM = `You are a professional NGA sports card grader. You MUST strictly follow these NGA grading rules:
+
+1. EVALUATION CATEGORIES (Score 1-10 each):
+- CENTERING (25%): 10 (50/50-55/45), 9 (60/40), 8 (70/30), 7 (80/20), 6 (85/15), 5-1 (>90/10).
+- CORNERS (25%): 10 (Razor sharp), 9 (Slightly soft), 8 (Two corners touched), 7 (Minor visible wear), 6 (Noticeable rounding), 5-4 (Rounded), 3-1 (Heavy wear).
+- EDGES (20%): 10 (Perfect), 9 (Tiny nick), 8 (Light wear), 7 (Noticeable whitening), 6 (Multiple nicks), 5-4 (Moderate chipping), 3-1 (Severe wear).
+- SURFACE (20%): 10 (Flawless), 9 (Tiny print line), 8 (Minor wear/light scratch), 7 (Small dent), 6 (Multiple scratches), 5-4 (Scuffing), 3-1 (Creases/deep scratches).
+- PRINT QUALITY (10%): 10 (Sharp focus), 9 (Slight print dot), 8 (Shadowing), 7 (Noticeable misprint), 6-4 (Poor color), 3-1 (Major error).
+
+2. FINAL GRADE CALCULATION:
+- STEP A: Start with the average of all five categories (rounded DOWN to the nearest whole or half number).
+- STEP B: Apply Penalties: If any category is 2+ grades below the others, reduce final grade by 1 point.
+- STEP C: Apply Caps:
+  - If SURFACE or CORNERS are below 6, the Overall Grade is CAPPED at 6.0.
+  - If the card has a CREASE, the Overall Grade is CAPPED at 5.0.
+
+3. DESIGNATION MAP:
+10: GEM MT, 9.5: MINT+, 9: MINT, 8.5: NM-MT+, 8: NM-MT, 7.5: NM+, 7: NM, 6.5: EX-MT+, 6: EX-MT, 5.5: EX+, 5: EX, 4.5: VG-EX+, 4: VG-EX, 3.5: VG+, 3: VG, 2.5: GOOD+, 2: GOOD, 1.5: FAIR, 1: POOR.
+
+Return JSON only.`;
 
 export const testConnection = async (): Promise<{ success: boolean; message: string }> => {
     try {
@@ -174,14 +193,26 @@ export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb
     }
 };
 
-export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, card: CardData, grade: number, gradeName: string, cb: any): Promise<any> => {
+export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, card: CardData, grade: number, gradeName: string, details: EvaluationDetails): Promise<any> => {
     try {
         const ai = getAI();
+        const breakdownContext = `
+        New Scores:
+        - Centering: ${details.centering.grade} (Notes: ${details.centering.notes})
+        - Corners: ${details.corners.grade} (Notes: ${details.corners.notes})
+        - Edges: ${details.edges.grade} (Notes: ${details.edges.notes})
+        - Surface: ${details.surface.grade} (Notes: ${details.surface.notes})
+        - Print Quality: ${details.printQuality.grade} (Notes: ${details.printQuality.notes})
+        `;
+
         return await retryWithBackoff(async () => {
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: { parts: [
-                    { text: `The user has manually set the grade to ${grade} (${gradeName}). Please rewrite the grader analysis summary. Return full JSON.` },
+                    { text: `The user has manually set the grade to ${grade} (${gradeName}). Based on the technical breakdown below, rewrite the grader analysis summary. Return full JSON. 
+                    
+                    Technical Context:
+                    ${breakdownContext}` },
                     { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                     { inlineData: { mimeType: 'image/jpeg', data: b64 } },
                 ]},

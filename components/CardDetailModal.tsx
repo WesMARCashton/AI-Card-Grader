@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { CardData } from '../types';
+import { CardData, EvaluationDetails } from '../types';
 import { GradeDisplay, EvaluationRow } from './GradeDisplays';
 import { ImageLightbox } from './ImageLightbox';
 import { GavelIcon, ArrowUpIcon, ArrowDownIcon, SpinnerIcon, CheckIcon, TrashIcon, EditIcon, ResyncIcon, CurrencyIcon, LinkIcon } from './icons';
@@ -14,9 +14,9 @@ interface CardDetailModalProps {
   onChallengeGrade: (card: CardData, direction: 'higher' | 'lower') => void;
   onAcceptGrade: (cardId: string) => void;
   onDelete: (cardId: string) => void;
-  onManualGrade: (card: CardData, grade: number, gradeName: string) => void;
+  onManualGrade: (card: CardData, grade: number, gradeName: string, details: EvaluationDetails) => void;
   onRetryGrading?: (card: CardData) => void; 
-  onGetMarketValue?: (card: CardData) => void; // New prop
+  onGetMarketValue?: (card: CardData) => void; 
 }
 
 const InfoPill: React.FC<{ label: string, value?: string }> = ({ label, value }) => (
@@ -37,8 +37,8 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
     onClose();
   };
 
-  const handleManualSave = (grade: number, gradeName: string) => {
-    onManualGrade(card, grade, gradeName);
+  const handleManualSave = (grade: number, gradeName: string, details: EvaluationDetails) => {
+    onManualGrade(card, grade, gradeName, details);
     setIsManualEntry(false);
     onClose(); 
   };
@@ -167,7 +167,6 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
                     )}
                 </div>
 
-                {/* Market Value Section */}
                 {card.status === 'reviewed' && (
                     <div className="w-full p-4 bg-green-50 border border-green-200 rounded-xl shadow-sm">
                          <h4 className="text-sm font-bold uppercase tracking-wider text-green-800 text-center mb-3 flex items-center justify-center gap-2">
@@ -275,6 +274,7 @@ export const CardDetailModal: React.FC<CardDetailModalProps> = ({ card, onClose,
         <ManualGradeModal
           initialGrade={card.overallGrade || 8}
           initialGradeName={card.gradeName || 'NM-MT'}
+          initialDetails={card.details}
           onSave={handleManualSave}
           onClose={() => setIsManualEntry(false)}
           isSaving={card.status === 'regenerating_summary'}

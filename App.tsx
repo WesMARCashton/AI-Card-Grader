@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { CardData, AppView, User } from './types';
+import { CardData, AppView, User, EvaluationDetails } from './types';
 import { CardScanner } from './components/CardScanner';
 import { CardHistory } from './components/CardHistory';
 import { Auth } from './components/Auth';
@@ -190,7 +190,7 @@ const App: React.FC = () => {
       } else if (card.status === 'challenging') {
         updates = await challengeGrade(card, card.challengeDirection!, () => {});
       } else if (card.status === 'regenerating_summary' || card.status === 'generating_summary') {
-        updates = await regenerateCardAnalysisForGrade(f64, b64, card, card.overallGrade!, card.gradeName!, () => {});
+        updates = await regenerateCardAnalysisForGrade(f64, b64, card, card.overallGrade!, card.gradeName!, card.details!);
         nextStatus = 'reviewed';
       } else if (card.status === 'fetching_value') {
         updates = { marketValue: await getCardMarketValue(card) };
@@ -210,7 +210,7 @@ const App: React.FC = () => {
       } else if (err.includes("SERVER_OVERLOADED")) {
           setPauseMessage('AI Service is currently overloaded...');
           setQuotaPause(true);
-          setQuotaTimer(20); // Shorter pause for server overload
+          setQuotaTimer(20); 
       }
       
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: err } : c));
@@ -272,7 +272,7 @@ const App: React.FC = () => {
             onChallengeGrade={(c, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'challenging', challengeDirection: d } : x))}
             onRetryGrading={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'grading', errorMessage: undefined } : x))}
             onAcceptGrade={id => setCards(cur => cur.map(c => c.id === id ? { ...c, status: 'fetching_value', errorMessage: undefined } : c))}
-            onManualGrade={(c, g, n) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n } : x))}
+            onManualGrade={(c, g, n, d) => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'regenerating_summary', overallGrade: g, gradeName: n, details: d } : x))}
             onLoadCollection={() => refreshCollection(false)} onSyncFromSheet={handleSyncFromSheet}
             onGetMarketValue={c => setCards(cur => cur.map(x => x.id === c.id ? { ...x, status: 'fetching_value', errorMessage: undefined } : x))}
             userName={user?.name || ''} 

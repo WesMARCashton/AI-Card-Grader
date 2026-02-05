@@ -1,10 +1,13 @@
+
 import React, { useState, useEffect } from 'react';
 import { SpinnerIcon } from './icons';
+import { EvaluationDetails, SubGradeDetail } from '../types';
 
 interface ManualGradeModalProps {
     initialGrade: number;
     initialGradeName: string;
-    onSave: (grade: number, gradeName: string) => void;
+    initialDetails?: EvaluationDetails;
+    onSave: (grade: number, gradeName: string, details: EvaluationDetails) => void;
     onClose: () => void;
     isSaving: boolean;
     savingStatus: string;
@@ -32,87 +35,147 @@ const gradeMap: { [key: number]: string } = {
     1: 'POOR'
 };
 
-
 const getGradeName = (grade: number | ''): string => {
     if (grade === '') return '';
     return gradeMap[grade] || 'Custom Grade';
 };
 
-
-export const ManualGradeModal: React.FC<ManualGradeModalProps> = ({ initialGrade, initialGradeName, onSave, onClose, isSaving, savingStatus }) => {
-    const [grade, setGrade] = useState<number | ''>(initialGrade);
+export const ManualGradeModal: React.FC<ManualGradeModalProps> = ({ 
+    initialGrade, 
+    initialGradeName, 
+    initialDetails,
+    onSave, 
+    onClose, 
+    isSaving, 
+    savingStatus 
+}) => {
+    const [overallGrade, setOverallGrade] = useState<number | ''>(initialGrade);
     const [gradeName, setGradeName] = useState(initialGradeName);
+    
+    const [details, setDetails] = useState<EvaluationDetails>(initialDetails || {
+        centering: { grade: 8, notes: '' },
+        corners: { grade: 8, notes: '' },
+        edges: { grade: 8, notes: '' },
+        surface: { grade: 8, notes: '' },
+        printQuality: { grade: 8, notes: '' }
+    });
 
     useEffect(() => {
-        // Automatically update the grade name when the numeric grade changes.
-        if (typeof grade === 'number') {
-            const suggestedName = getGradeName(grade);
+        if (typeof overallGrade === 'number') {
+            const suggestedName = getGradeName(overallGrade);
             setGradeName(suggestedName);
         }
-    }, [grade]);
+    }, [overallGrade]);
 
+    const handleDetailChange = (category: keyof EvaluationDetails, field: keyof SubGradeDetail, value: any) => {
+        setDetails(prev => ({
+            ...prev,
+            [category]: {
+                ...prev[category],
+                [field]: value
+            }
+        }));
+    };
 
     const handleSave = () => {
-        if (typeof grade === 'number' && grade >= 1 && grade <= 10 && gradeName.trim()) {
-            onSave(grade, gradeName.trim());
+        if (typeof overallGrade === 'number' && overallGrade >= 1 && overallGrade <= 10 && gradeName.trim()) {
+            onSave(overallGrade, gradeName.trim(), details);
         }
     };
 
+    const categories: { key: keyof EvaluationDetails; label: string }[] = [
+        { key: 'centering', label: 'Centering' },
+        { key: 'corners', label: 'Corners' },
+        { key: 'edges', label: 'Edges' },
+        { key: 'surface', label: 'Surface' },
+        { key: 'printQuality', label: 'Print Quality' }
+    ];
+
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4 animate-fade-in" onClick={onClose}>
-            <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
-                <h2 className="text-xl font-bold text-slate-800 mb-4">Manual Grade Entry</h2>
-                <div className="space-y-4">
-                    <div>
-                        <label htmlFor="grade-number" className="block text-sm font-medium text-slate-700 mb-1">Overall Grade (1-10)</label>
-                        <input
-                            type="number"
-                            id="grade-number"
-                            value={grade}
-                            onChange={(e) => {
-                                const val = e.target.value;
-                                if (val === '') {
-                                    setGrade('');
-                                    return;
-                                }
-                                const num = parseFloat(val);
-                                if (!isNaN(num)) {
-                                    setGrade(Math.max(1, Math.min(10, num)));
-                                }
-                            }}
-                            min="1"
-                            max="10"
-                            step="0.5"
-                            className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50"
-                            disabled={isSaving}
-                        />
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-[100] p-4 animate-fade-in" onClick={onClose}>
+            <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-center mb-6 border-b pb-4">
+                    <h2 className="text-2xl font-bold text-slate-800">Grader Worksheet</h2>
+                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors text-3xl">&times;</button>
+                </div>
+
+                <div className="space-y-8">
+                    {/* Overall Score Section */}
+                    <div className="bg-blue-50 p-6 rounded-xl border border-blue-100 grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div>
+                            <label className="block text-xs font-bold text-blue-600 uppercase tracking-widest mb-2">Likely NGA Grade (1-10)</label>
+                            <input
+                                type="number"
+                                value={overallGrade}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (val === '') { setOverallGrade(''); return; }
+                                    const num = parseFloat(val);
+                                    if (!isNaN(num)) setOverallGrade(Math.max(1, Math.min(10, num)));
+                                }}
+                                min="1" max="10" step="0.5"
+                                className="w-full px-4 py-3 text-2xl font-bold border border-blue-200 rounded-lg shadow-inner focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                disabled={isSaving}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-bold text-blue-600 uppercase tracking-widest mb-2">Grade Designation</label>
+                            <input
+                                type="text"
+                                value={gradeName}
+                                onChange={(e) => setGradeName(e.target.value)}
+                                placeholder="e.g., GEM MT"
+                                className="w-full px-4 py-3 text-2xl font-bold border border-blue-200 rounded-lg shadow-inner focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                                disabled={isSaving}
+                            />
+                        </div>
                     </div>
-                    <div>
-                        <label htmlFor="grade-name" className="block text-sm font-medium text-slate-700 mb-1">Grade Name</label>
-                        <input
-                            type="text"
-                            id="grade-name"
-                            value={gradeName}
-                            onChange={(e) => setGradeName(e.target.value)}
-                            placeholder="e.g., Mint, Near Mint"
-                            className="w-full px-3 py-2 border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-slate-50"
-                            disabled={isSaving}
-                        />
+
+                    {/* technical breakdown section */}
+                    <div className="space-y-6">
+                        <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest border-b pb-2">Technical Breakdown</h3>
+                        
+                        {categories.map((cat) => (
+                            <div key={cat.key} className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-start bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                <div className="sm:col-span-3">
+                                    <label className="block text-sm font-bold text-slate-700 mb-1">{cat.label}</label>
+                                    <input
+                                        type="number"
+                                        value={details[cat.key].grade}
+                                        onChange={(e) => handleDetailChange(cat.key, 'grade', parseFloat(e.target.value) || 0)}
+                                        min="0" max="10" step="0.1"
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md font-bold text-blue-600"
+                                        disabled={isSaving}
+                                    />
+                                </div>
+                                <div className="sm:col-span-9">
+                                    <label className="block text-xs font-semibold text-slate-500 mb-1">Observation Notes</label>
+                                    <textarea
+                                        value={details[cat.key].notes}
+                                        onChange={(e) => handleDetailChange(cat.key, 'notes', e.target.value)}
+                                        placeholder={`Notes about ${cat.label.toLowerCase()}...`}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm min-h-[60px]"
+                                        disabled={isSaving}
+                                    />
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
-                <div className="flex justify-end gap-3 pt-6">
-                    <button onClick={onClose} className="py-2 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-md transition" disabled={isSaving}>
+
+                <div className="flex flex-col sm:flex-row justify-end gap-3 pt-8 mt-6 border-t">
+                    <button onClick={onClose} className="py-3 px-6 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition" disabled={isSaving}>
                         Cancel
                     </button>
                     <button
                         onClick={handleSave}
-                        disabled={typeof grade !== 'number' || !gradeName.trim() || isSaving}
-                        className="py-2 px-4 min-w-[11rem] flex justify-center items-center bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-md transition disabled:opacity-50 disabled:cursor-wait"
+                        disabled={typeof overallGrade !== 'number' || !gradeName.trim() || isSaving}
+                        className="py-3 px-8 flex justify-center items-center bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition shadow-lg disabled:opacity-50 disabled:cursor-wait"
                     >
                         {isSaving ? (
                             <>
-                                <SpinnerIcon className="w-5 h-5 mr-2 flex-shrink-0" />
-                                <span className="min-w-0 text-center break-words">{savingStatus || 'Regenerating...'}</span>
+                                <SpinnerIcon className="w-5 h-5 mr-2" />
+                                <span>{savingStatus || 'Writing Analysis...'}</span>
                             </>
                         ) : (
                             'Save & Rewrite Analysis'
