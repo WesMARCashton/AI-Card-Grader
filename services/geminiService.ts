@@ -61,10 +61,14 @@ const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 4, delay =
             errStr.includes("unavailable") ||
             errStr.includes("resource_exhausted");
 
+        // If it's specifically a daily limit error, retrying immediately won't help
+        if (errStr.includes("daily") && errStr.includes("limit")) {
+            throw e; 
+        }
+
         if (isRetryable && maxRetries > 0) {
             console.warn(`Gemini API Busy/Limited (${errStr}). Retrying ${maxRetries} more times in ${delay}ms...`);
             await new Promise(r => setTimeout(r, delay));
-            // Exponential backoff: multiply delay for next attempt
             return retryWithBackoff(fn, maxRetries - 1, delay * 2);
         }
         throw e;
@@ -80,7 +84,10 @@ const handleApiError = (e: any, context: string = "general") => {
     }
 
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
-        throw new Error("QUOTA_EXHAUSTED: You have hit your Google Cloud project rate limit (RPM/TPM). If using a free key, wait 60s. If paid, check your console billing status.");
+        if (errorStr.includes("daily") || errorStr.includes("20")) {
+            throw new Error("DAILY_QUOTA_REACHED: You have used all 20 free requests for today. To continue, you must enable billing in Google Cloud for your project.");
+        }
+        throw new Error("QUOTA_EXHAUSTED: You are sending requests too fast. Please wait 60 seconds.");
     }
 
     if (errorStr.includes("503") || errorStr.includes("overloaded") || errorStr.includes("unavailable")) {

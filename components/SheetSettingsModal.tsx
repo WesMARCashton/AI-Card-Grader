@@ -43,6 +43,8 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
         if (!isSaved) (process.env as any).API_KEY = oldKey;
     };
 
+    const isQuotaError = testStatus.result?.includes('429') || testStatus.result?.includes('quota');
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex justify-center items-center z-50 p-4 animate-fade-in" onClick={onClose}>
             <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
@@ -54,18 +56,28 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                 <div className="space-y-6">
                     <div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
                         <h3 className="text-sm font-bold text-blue-800 flex items-center gap-2 mb-2">
-                            <KeyIcon className="w-4 h-4" /> Grader API Connection
+                            <KeyIcon className="w-4 h-4" /> Gemini AI Connection
                         </h3>
                         
                         <div className="space-y-3">
-                            <div className="p-3 bg-white border border-blue-200 rounded text-[11px] text-blue-700 font-medium">
-                                <strong>💡 Fixing "Billing Restriction" errors:</strong>
-                                <ol className="list-decimal ml-4 mt-1 space-y-1">
-                                    <li>Ensure billing is linked in AI Studio.</li>
-                                    <li>Create a <u>BRAND NEW</u> API key.</li>
-                                    <li>Paste it below. Old keys can stay "locked" to free limits for hours.</li>
-                                </ol>
-                            </div>
+                            {isQuotaError && (
+                                <div className="p-3 bg-red-50 border border-red-200 rounded text-[11px] text-red-700 font-medium">
+                                    <strong className="block text-xs mb-1">⚠️ Quota/Daily Limit Hit!</strong>
+                                    Your error message shows you have exceeded the **20 requests per day** limit of the Free Tier. 
+                                    <div className="mt-2 space-y-1">
+                                        <p>1. Open <a href="https://console.cloud.google.com/billing" target="_blank" className="underline font-bold">Google Cloud Billing</a></p>
+                                        <p>2. Link your Project to a billing account (Credit Card).</p>
+                                        <p>3. This removes the 20-request daily cap.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isQuotaError && (
+                                <div className="p-3 bg-white border border-blue-200 rounded text-[11px] text-blue-700 font-medium">
+                                    <strong>💡 Need more than 20 scans per day?</strong>
+                                    <p className="mt-1">Google's Free Tier limits you to 20 requests daily. To fix this, you must enable billing for your project in the Google Cloud Console.</p>
+                                </div>
+                            )}
 
                             <div>
                                 <label htmlFor="manual-api-key" className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Enter API Key Manually</label>
@@ -92,9 +104,14 @@ export const SheetSettingsModal: React.FC<SheetSettingsModalProps> = ({ onClose 
                             )}
                         </div>
                         
-                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="block text-[10px] text-blue-500 hover:underline mt-4 text-center font-bold flex items-center justify-center gap-1">
-                            <LinkIcon className="w-3 h-3" /> Go to Google AI Studio Key Page
-                        </a>
+                        <div className="mt-4 flex flex-col gap-2">
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-[10px] text-blue-500 hover:underline font-bold flex items-center justify-center gap-1">
+                                <LinkIcon className="w-3 h-3" /> Get API Key (AI Studio)
+                            </a>
+                            <a href="https://console.cloud.google.com/billing" target="_blank" rel="noreferrer" className="text-[10px] text-slate-500 hover:underline font-bold flex items-center justify-center gap-1">
+                                <LinkIcon className="w-3 h-3" /> Manage Cloud Billing
+                            </a>
+                        </div>
                     </div>
 
                     <div>
