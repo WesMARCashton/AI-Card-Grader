@@ -13,8 +13,9 @@ import {
 } from './services/geminiService';
 import { getCollection, saveCollection } from './services/driveService';
 import { fetchCardsFromSheet } from './services/sheetsService';
-import { HistoryIcon, SpinnerIcon } from './components/icons';
+import { HistoryIcon, SpinnerIcon, CogIcon } from './components/icons';
 import { dataUrlToBase64 } from './utils/fileUtils';
+import { SheetSettingsModal } from './components/SheetSettingsModal';
 
 const SHEET_URL_STORAGE = 'google_sheet_url';
 const LOCAL_CARDS_STORAGE = 'nga_card_collection_local';
@@ -69,6 +70,7 @@ const App: React.FC = () => {
   const [quotaPause, setQuotaPause] = useState(false);
   const [quotaTimer, setQuotaTimer] = useState(0);
   const [pauseMessage, setPauseMessage] = useState('AI busy... waiting for quota reset');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   const [cards, setCards] = useState<CardData[]>(() => {
     const recoveredMap = new Map<string, any>();
@@ -110,6 +112,7 @@ const App: React.FC = () => {
   const [driveFileId, setDriveFileId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const processingCards = useRef(new Set<string>());
+  const quotaRetryCounts = useRef<Record<string, number>>({});
   const lastSavedRef = useRef('');
 
   useEffect(() => {
@@ -198,15 +201,29 @@ const App: React.FC = () => {
       }
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false, errorMessage: undefined } : c));
+      
+      // Clear retry count on success
+      quotaRetryCounts.current[card.id] = 0;
       setQuotaPause(false); 
     } catch (e: any) {
       console.error(`[Queue] Error:`, e);
       const err = e.message || "Unknown error";
       
-      if (err.includes("QUOTA_EXHAUSTED") || err.includes("SERVER_OVERLOADED")) {
-          setPauseMessage(err.includes("QUOTA") ? 'API limit reached. Waiting for reset...' : 'AI is overloaded. Retrying soon...');
-          setQuotaPause(true);
-          setQuotaTimer(60); // 60s cooldown for quota/overload
+      const isQuotaErr = err.includes("QUOTA_EXHAUSTED") || err.includes("SERVER_OVERLOADED");
+      
+      if (isQuotaErr) {
+          const retries = quotaRetryCounts.current[card.id] || 0;
+          if (retries < 2) {
+              // Try auto-resuming up to 2 times
+              quotaRetryCounts.current[card.id] = retries + 1;
+              setPauseMessage(err.includes("QUOTA") ? 'API limit reached. Waiting for reset...' : 'AI is overloaded. Retrying soon...');
+              setQuotaPause(true);
+              setQuotaTimer(60); 
+          } else {
+              // Fail definitively after too many quota hits
+              quotaRetryCounts.current[card.id] = 0;
+              setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: "AI Service permanently unavailable or Quota consistently exceeded. Check API Billing or retry later." } : c));
+          }
       } else {
           setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: err } : c));
       }
@@ -276,19 +293,38 @@ const App: React.FC = () => {
             isRewriting={false} rewriteProgress={0} rewrittenCount={0} rewriteFailCount={0} rewriteStatusMessage={''}
           />
         ) : (
-          <CardScanner onRatingRequest={(f, b) => { setCards(cur => [{ id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', status: 'grading' }, ...cur]); setView('history'); }} isGrading={cards.some(c => ['grading', 'challenging'].includes(c.status))} isLoggedIn={!!user} hasCards={cards.length > 0} onSyncDrive={() => refreshCollection(false)} isSyncing={syncStatus === 'loading'} />
+          <CardScanner onRatingRequest={(f, b) => { setCards(cur => [{ id: generateId(), frontImage: f, backImage: b, timestamp: Date.now(), gradingSystem: 'NGA', status: 'grading' }, ...cur]); setView('history'); }} isGrading={cards.some(c => ['grading', 'challenging', 'regenerating_summary', 'generating_summary', 'fetching_value'].includes(c.status))} isLoggedIn={!!user} hasCards={cards.length > 0} onSyncDrive={() => refreshCollection(false)} isSyncing={syncStatus === 'loading'} />
         )}
       </main>
+      
       {quotaPause && (
-        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:w-96 bg-blue-900 text-white p-3 rounded-lg shadow-xl flex items-center gap-3 animate-slide-up z-50">
-           <SpinnerIcon className="w-5 h-5 text-blue-300" />
-           <div>
-             <p className="text-xs font-bold">{pauseMessage}</p>
-             <p className="text-[10px] text-blue-200">Automatically resuming in {quotaTimer}s...</p>
+        <div className="fixed bottom-4 left-4 right-4 md:left-auto md:w-[28rem] bg-blue-900 text-white p-4 rounded-2xl shadow-2xl flex flex-col gap-3 animate-slide-up z-[60] border border-blue-700">
+           <div className="flex items-center gap-3">
+             <SpinnerIcon className="w-6 h-6 text-blue-300" />
+             <div className="flex-grow">
+               <p className="text-sm font-bold">{pauseMessage}</p>
+               <p className="text-[11px] text-blue-200">Automatically resuming in {quotaTimer}s. This happens when using free-tier API keys or hitting rapid usage limits.</p>
+             </div>
            </div>
-           <button onClick={() => {setQuotaPause(false); setQuotaTimer(0);}} className="text-[10px] bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
+           <div className="flex gap-2">
+             <button 
+                onClick={() => setIsSettingsOpen(true)}
+                className="flex-1 text-[11px] bg-blue-800 hover:bg-blue-700 px-3 py-2 rounded-lg font-bold transition flex items-center justify-center gap-1.5"
+             >
+                <CogIcon className="w-3.5 h-3.5" />
+                Fix API Key
+             </button>
+             <button 
+                onClick={() => {setQuotaPause(false); setQuotaTimer(0);}} 
+                className="flex-1 text-[11px] bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg font-bold transition shadow-md"
+             >
+                Resume Now
+             </button>
+           </div>
         </div>
       )}
+      
+      {isSettingsOpen && <SheetSettingsModal onClose={() => setIsSettingsOpen(false)} />}
     </div>
   );
 };

@@ -80,15 +80,15 @@ const handleApiError = (e: any, context: string = "general") => {
     }
 
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
-        throw new Error("QUOTA_EXHAUSTED");
+        throw new Error("QUOTA_EXHAUSTED: You have hit your Google Cloud project rate limit (RPM/TPM). If using a free key, wait 60s. If paid, check your console billing status.");
     }
 
     if (errorStr.includes("503") || errorStr.includes("overloaded") || errorStr.includes("unavailable")) {
-        throw new Error("SERVER_OVERLOADED");
+        throw new Error("SERVER_OVERLOADED: The AI model is currently receiving too many requests. Please try again in a few moments.");
     }
     
     if (errorStr.includes("api_key_invalid") || errorStr.includes("key not found")) {
-        throw new Error("API_KEY_INVALID");
+        throw new Error("API_KEY_INVALID: The provided API key is either incorrect or has been disabled.");
     }
 
     throw new Error(e.message || "Unknown API Error");
