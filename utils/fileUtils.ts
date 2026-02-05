@@ -14,15 +14,14 @@ export const dataUrlToBase64 = (dataUrl: string): string => {
     if (parts.length > 1) {
         return parts[1];
     }
-    // It might already be a base64 string
     return dataUrl; 
 }
 
 /**
- * Resizes an image (dataUrl) to a maximum width to reduce payload size for the Gemini API.
- * This helps stay within Tokens Per Minute (TPM) limits and prevents 429 errors.
+ * Resizes an image to a smaller footprint.
+ * Lowering from 1024 to 800 significantly reduces Token usage in Gemini.
  */
-export const optimizeImageForGemini = async (dataUrl: string, maxWidth = 1024): Promise<string> => {
+export const optimizeImageForGemini = async (dataUrl: string, maxWidth = 800): Promise<string> => {
     if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl;
     
     return new Promise((resolve) => {
@@ -46,17 +45,14 @@ export const optimizeImageForGemini = async (dataUrl: string, maxWidth = 1024): 
             }
             
             ctx.drawImage(img, 0, 0, width, height);
-            // Use JPEG at 0.8 quality for a good balance of detail and file size
-            resolve(canvas.toDataURL('image/jpeg', 0.8));
+            // 0.7 quality is sufficient for card identification but much smaller in size
+            resolve(canvas.toDataURL('image/jpeg', 0.7));
         };
         img.onerror = () => resolve(dataUrl);
         img.src = dataUrl;
     });
 };
 
-/**
- * Ensures that the image data string is a valid data URL.
- */
 export const ensureDataUrl = (imageData: any): string => {
     if (imageData === null || imageData === undefined || typeof imageData !== 'string') {
         return '';

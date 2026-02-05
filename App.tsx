@@ -68,6 +68,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<AppView>('scanner');
   const [quotaPause, setQuotaPause] = useState(false);
   const [quotaTimer, setQuotaTimer] = useState(0);
+  const [pauseMessage, setPauseMessage] = useState('Waiting for AI quota reset...');
   
   const [cards, setCards] = useState<CardData[]>(() => {
     const recoveredMap = new Map<string, any>();
@@ -173,17 +174,8 @@ const App: React.FC = () => {
   const processCard = useCallback(async (card: CardData) => {
     if (processingCards.current.has(card.id)) return;
     
-    console.log(`[Queue] Starting process for card: ${card.id} (${card.status})`);
+    console.log(`[Queue] Processing: ${card.id}`);
     processingCards.current.add(card.id);
-
-    // Safety timeout: 60 seconds
-    const safetyTimeout = setTimeout(() => {
-        if (processingCards.current.has(card.id)) {
-            console.error(`[Queue] Timeout reached for card ${card.id}. Unblocking queue.`);
-            processingCards.current.delete(card.id);
-            setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: "Request timed out. Please try again." } : c));
-        }
-    }, 65000);
 
     try {
       if (!card.frontImage || !card.backImage) throw new Error("Missing images.");
@@ -207,21 +199,22 @@ const App: React.FC = () => {
 
       setCards(prev => prev.map(c => c.id === card.id ? { ...c, ...updates, status: nextStatus, isSynced: false, errorMessage: undefined } : c));
       setQuotaPause(false); 
-      console.log(`[Queue] Successfully processed card: ${card.id}`);
     } catch (e: any) {
-      console.error(`[Queue] Error processing card ${card.id}:`, e);
-      if (e.message === 'SEARCH_BILLING_ISSUE' || e.message === 'BILLING_LINK_REQUIRED') {
-          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'reviewed', errorMessage: "Pricing Restricted. Needs billing setup." } : c));
+      console.error(`[Queue] Error:`, e);
+      const err = e.message || "Unknown error";
+      
+      if (err.includes("QUOTA_EXHAUSTED")) {
+          setPauseMessage('Waiting for AI quota reset...');
           setQuotaPause(true);
-          setQuotaTimer(30);
-          return;
-      } else if (e.message === 'SEARCH_QUOTA_EXHAUSTED' || e.message === 'QUOTA_EXHAUSTED') {
+          setQuotaTimer(45); 
+      } else if (err.includes("SERVER_OVERLOADED")) {
+          setPauseMessage('AI Service is currently overloaded...');
           setQuotaPause(true);
-          setQuotaTimer(30);
+          setQuotaTimer(20); // Shorter pause for server overload
       }
-      setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: e.message } : c));
+      
+      setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: err } : c));
     } finally { 
-      clearTimeout(safetyTimeout);
       processingCards.current.delete(card.id); 
     }
   }, []);
@@ -294,8 +287,8 @@ const App: React.FC = () => {
         <div className="fixed bottom-4 left-4 right-4 md:left-auto md:w-96 bg-blue-900 text-white p-3 rounded-lg shadow-xl flex items-center gap-3 animate-slide-up z-50">
            <SpinnerIcon className="w-5 h-5 text-blue-300" />
            <div>
-             <p className="text-xs font-bold">Throttling Requests</p>
-             <p className="text-[10px] text-blue-200">Rate limit protection active. Resuming in {quotaTimer}s...</p>
+             <p className="text-xs font-bold">{pauseMessage}</p>
+             <p className="text-[10px] text-blue-200">Processing will resume automatically in {quotaTimer}s.</p>
            </div>
            <button onClick={() => {setQuotaPause(false); setQuotaTimer(0);}} className="text-[10px] bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
         </div>

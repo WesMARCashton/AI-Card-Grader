@@ -1,7 +1,6 @@
 
 import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { CardData, MarketValue } from "../types";
-// Add missing import
 import { dataUrlToBase64 } from "../utils/fileUtils";
 
 const API_KEY_STORAGE_KEY = 'manual_gemini_api_key';
@@ -29,17 +28,42 @@ const getAI = () => {
 };
 
 /**
- * Retries a function with exponential backoff if a 429 error is detected.
+ * Executes a promise with a timeout.
  */
-const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 2, delay = 2000): Promise<T> => {
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error("API_TIMEOUT"));
+        }, ms);
+        promise.then(
+            (res) => { clearTimeout(timer); resolve(res); },
+            (err) => { clearTimeout(timer); reject(err); }
+        );
+    });
+};
+
+/**
+ * Retries with backoff and a hard 50s timeout.
+ * Includes handling for 503 Overloaded errors.
+ */
+const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 3, delay = 4000): Promise<T> => {
     try {
-        return await fn();
+        return await withTimeout(fn(), 50000); // 50s limit
     } catch (e: any) {
         const errStr = String(e).toLowerCase();
-        if ((errStr.includes("429") || errStr.includes("quota")) && maxRetries > 0) {
-            console.warn(`Gemini 429 hit. Retrying in ${delay}ms... (${maxRetries} left)`);
+        if (e.message === "API_TIMEOUT") throw e;
+        
+        const isRetryable = 
+            errStr.includes("429") || 
+            errStr.includes("quota") || 
+            errStr.includes("503") || 
+            errStr.includes("overloaded") ||
+            errStr.includes("unavailable");
+
+        if (isRetryable && maxRetries > 0) {
+            console.warn(`Gemini transient error (${errStr}). Retrying in ${delay}ms...`);
             await new Promise(r => setTimeout(r, delay));
-            return retryWithBackoff(fn, maxRetries - 1, delay * 2);
+            return retryWithBackoff(fn, maxRetries - 1, delay * 1.5);
         }
         throw e;
     }
@@ -49,18 +73,16 @@ const handleApiError = (e: any, context: string = "general") => {
     console.error(`Gemini API Error [${context}]:`, e);
     const errorStr = String(e).toLowerCase();
     
+    if (e.message === "API_TIMEOUT") {
+        throw new Error("The AI took too long to respond. This usually happens on slow connections or when images are too large.");
+    }
+
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {
-        const billingKeywords = ["billing", "check your plan", "project", "paid"];
-        const isBillingRestricted = billingKeywords.some(k => errorStr.includes(k));
-        
-        if (context === "market_value") {
-            throw new Error(isBillingRestricted ? "SEARCH_BILLING_ISSUE" : "SEARCH_QUOTA_EXHAUSTED");
-        }
-        
-        if (isBillingRestricted) {
-            throw new Error("BILLING_LINK_REQUIRED");
-        }
         throw new Error("QUOTA_EXHAUSTED");
+    }
+
+    if (errorStr.includes("503") || errorStr.includes("overloaded") || errorStr.includes("unavailable")) {
+        throw new Error("SERVER_OVERLOADED");
     }
     
     if (errorStr.includes("api_key_invalid") || errorStr.includes("key not found")) {
@@ -76,18 +98,13 @@ export const testConnection = async (): Promise<{ success: boolean; message: str
     try {
         const ai = getAI();
         const response = await ai.models.generateContent({
-            // Fix: Use correct model name for basic verification tasks
             model: 'gemini-3-flash-preview',
             contents: "Hi",
             config: { maxOutputTokens: 5 }
         });
-        return { success: true, message: "Connection Successful! Your key is communicating with Gemini." };
+        return { success: true, message: "Connection Successful!" };
     } catch (e: any) {
-        const err = String(e).toLowerCase();
-        if (err.includes("429") || err.includes("quota")) {
-            return { success: false, message: "Quota reached. Your account is functional but you are exceeding speed limits." };
-        }
-        return { success: false, message: e.message || "Connection failed. Verify your key." };
+        return { success: false, message: e.message || "Connection failed." };
     }
 };
 
@@ -134,7 +151,6 @@ export const getCardMarketValue = async (card: CardData): Promise<MarketValue> =
     }
 };
 
-// Fix: Complete challengeGrade function and fix shorthand config property error
 export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb: any): Promise<any> => {
     try {
         const ai = getAI();
@@ -145,7 +161,7 @@ export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: { parts: [
-                    { text: `Re-evaluate this card with a bias that the grade should be ${dir} than ${card.overallGrade}. Return updated JSON with full NGA grading details.` },
+                    { text: `Re-evaluate this card with a bias that the grade should be ${dir} than ${card.overallGrade}. Return updated JSON.` },
                     { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                     { inlineData: { mimeType: 'image/jpeg', data: b64 } },
                 ]},
@@ -158,7 +174,6 @@ export const challengeGrade = async (card: CardData, dir: 'higher' | 'lower', cb
     }
 };
 
-// Fix: Add missing regenerateCardAnalysisForGrade export used in App.tsx
 export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, card: CardData, grade: number, gradeName: string, cb: any): Promise<any> => {
     try {
         const ai = getAI();
@@ -166,7 +181,7 @@ export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, c
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: { parts: [
-                    { text: `The user has manually set the grade to ${grade} (${gradeName}). Please rewrite the grader analysis summary to align with this new grade while keeping identification info the same. Return full JSON.` },
+                    { text: `The user has manually set the grade to ${grade} (${gradeName}). Please rewrite the grader analysis summary. Return full JSON.` },
                     { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                     { inlineData: { mimeType: 'image/jpeg', data: b64 } },
                 ]},
