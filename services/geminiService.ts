@@ -197,22 +197,33 @@ export const regenerateCardAnalysisForGrade = async (f64: string, b64: string, c
     try {
         const ai = getAI();
         const breakdownContext = `
-        New Scores:
-        - Centering: ${details.centering.grade} (Notes: ${details.centering.notes})
-        - Corners: ${details.corners.grade} (Notes: ${details.corners.notes})
-        - Edges: ${details.edges.grade} (Notes: ${details.edges.notes})
-        - Surface: ${details.surface.grade} (Notes: ${details.surface.notes})
-        - Print Quality: ${details.printQuality.grade} (Notes: ${details.printQuality.notes})
+        User Request:
+        - Target Overall Grade: ${grade} (${gradeName})
+        
+        Input Category Values (Strictly follow these numbers):
+        - Centering: ${details.centering.grade} (Existing Note: ${details.centering.notes})
+        - Corners: ${details.corners.grade} (Existing Note: ${details.corners.notes})
+        - Edges: ${details.edges.grade} (Existing Note: ${details.edges.notes})
+        - Surface: ${details.surface.grade} (Existing Note: ${details.surface.notes})
+        - Print Quality: ${details.printQuality.grade} (Existing Note: ${details.printQuality.notes})
         `;
+
+        const prompt = `The user has manually updated the numeric grades for this card. 
+        
+        YOUR TASK:
+        1. REWRITE the "notes" for EVERY category to match the new numeric values provided. If a numeric value changed (e.g. from 8 to 10), delete the old note and write a new one that describes a card with that specific score.
+        2. SMART FILL: If a category has the note "[Regenerate]", you must invent a score and note for that category so that the resulting NGA calculation matches the Target Overall Grade of ${grade}.
+        3. ENSURE CONSISTENCY: The category notes must explain why the card received that score (e.g., if Edges is 10, notes should say "Perfect edges").
+        4. REWRITE the "summary" (Official Grader Analysis) to be a high-quality professional justification for the final grade of ${grade}.
+        
+        Technical Context:
+        ${breakdownContext}`;
 
         return await retryWithBackoff(async () => {
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: { parts: [
-                    { text: `The user has manually set the grade to ${grade} (${gradeName}). Based on the technical breakdown below, rewrite the grader analysis summary. Return full JSON. 
-                    
-                    Technical Context:
-                    ${breakdownContext}` },
+                    { text: prompt },
                     { inlineData: { mimeType: 'image/jpeg', data: f64 } },
                     { inlineData: { mimeType: 'image/jpeg', data: b64 } },
                 ]},
