@@ -44,9 +44,9 @@ const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
 
 /**
  * Retries with backoff and a hard 50s timeout.
- * Includes handling for 503 Overloaded errors.
+ * Includes handling for 503 Overloaded and 429 Quota errors.
  */
-const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 3, delay = 4000): Promise<T> => {
+const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 4, delay = 5000): Promise<T> => {
     try {
         return await withTimeout(fn(), 50000); // 50s limit
     } catch (e: any) {
@@ -58,12 +58,14 @@ const retryWithBackoff = async <T>(fn: () => Promise<T>, maxRetries = 3, delay =
             errStr.includes("quota") || 
             errStr.includes("503") || 
             errStr.includes("overloaded") ||
-            errStr.includes("unavailable");
+            errStr.includes("unavailable") ||
+            errStr.includes("resource_exhausted");
 
         if (isRetryable && maxRetries > 0) {
-            console.warn(`Gemini transient error (${errStr}). Retrying in ${delay}ms...`);
+            console.warn(`Gemini API Busy/Limited (${errStr}). Retrying ${maxRetries} more times in ${delay}ms...`);
             await new Promise(r => setTimeout(r, delay));
-            return retryWithBackoff(fn, maxRetries - 1, delay * 1.5);
+            // Exponential backoff: multiply delay for next attempt
+            return retryWithBackoff(fn, maxRetries - 1, delay * 2);
         }
         throw e;
     }
@@ -74,7 +76,7 @@ const handleApiError = (e: any, context: string = "general") => {
     const errorStr = String(e).toLowerCase();
     
     if (e.message === "API_TIMEOUT") {
-        throw new Error("The AI took too long to respond. This usually happens on slow connections or when images are too large.");
+        throw new Error("The AI took too long to respond. This can happen on slow connections.");
     }
 
     if (errorStr.includes("429") || errorStr.includes("quota") || errorStr.includes("resource_exhausted")) {

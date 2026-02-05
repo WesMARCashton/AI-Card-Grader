@@ -68,7 +68,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<AppView>('scanner');
   const [quotaPause, setQuotaPause] = useState(false);
   const [quotaTimer, setQuotaTimer] = useState(0);
-  const [pauseMessage, setPauseMessage] = useState('Waiting for AI quota reset...');
+  const [pauseMessage, setPauseMessage] = useState('AI busy... waiting for quota reset');
   
   const [cards, setCards] = useState<CardData[]>(() => {
     const recoveredMap = new Map<string, any>();
@@ -203,17 +203,13 @@ const App: React.FC = () => {
       console.error(`[Queue] Error:`, e);
       const err = e.message || "Unknown error";
       
-      if (err.includes("QUOTA_EXHAUSTED")) {
-          setPauseMessage('Waiting for AI quota reset...');
+      if (err.includes("QUOTA_EXHAUSTED") || err.includes("SERVER_OVERLOADED")) {
+          setPauseMessage(err.includes("QUOTA") ? 'API limit reached. Waiting for reset...' : 'AI is overloaded. Retrying soon...');
           setQuotaPause(true);
-          setQuotaTimer(45); 
-      } else if (err.includes("SERVER_OVERLOADED")) {
-          setPauseMessage('AI Service is currently overloaded...');
-          setQuotaPause(true);
-          setQuotaTimer(20); 
+          setQuotaTimer(60); // 60s cooldown for quota/overload
+      } else {
+          setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: err } : c));
       }
-      
-      setCards(prev => prev.map(c => c.id === card.id ? { ...c, status: 'grading_failed', errorMessage: err } : c));
     } finally { 
       processingCards.current.delete(card.id); 
     }
@@ -288,7 +284,7 @@ const App: React.FC = () => {
            <SpinnerIcon className="w-5 h-5 text-blue-300" />
            <div>
              <p className="text-xs font-bold">{pauseMessage}</p>
-             <p className="text-[10px] text-blue-200">Processing will resume automatically in {quotaTimer}s.</p>
+             <p className="text-[10px] text-blue-200">Automatically resuming in {quotaTimer}s...</p>
            </div>
            <button onClick={() => {setQuotaPause(false); setQuotaTimer(0);}} className="text-[10px] bg-blue-700 hover:bg-blue-600 px-2 py-1 rounded font-bold ml-auto">Resume Now</button>
         </div>
